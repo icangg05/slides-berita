@@ -261,6 +261,7 @@ export function Kiosk({ initialPosts }: { initialPosts: NewsItem[] }) {
                       : { loading: activeSet.has(i) ? "eager" : "lazy" })}
                     sizes="(max-width: 1080px) 100vw, 1080px"
                     className="object-cover"
+                    unoptimized
                   />
                 </div>
               ) : (

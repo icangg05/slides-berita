@@ -296,6 +296,7 @@ export function DetailView({
               priority
               sizes="(max-width: 1080px) 100vw, 1080px"
               className="object-cover"
+              unoptimized
             />
           ) : (
             <div className="h-full w-full bg-gradient-to-br from-kendari-deep to-kendari-deepblue" />
