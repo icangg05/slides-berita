@@ -261,7 +261,7 @@ export function DetailView({
           </div>
           <div className="min-w-0 leading-tight">
             <p className="truncate font-heading text-sm font-extrabold tracking-tight text-white sm:text-base lg:text-xl">
-              Pemerintah Kota Kendari
+              Kota Kendari
             </p>
             <p className="truncate text-[0.7rem] font-medium text-blue-100/85 sm:text-xs lg:text-sm">
               Dinas Komunikasi dan Informatika

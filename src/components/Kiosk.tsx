@@ -50,13 +50,15 @@ export function Kiosk({ initialPosts }: { initialPosts: NewsItem[] }) {
   // controlled minimum time, then eased away — never a too-fast flash.
   const [bootVeil, setBootVeil] = useState(true);
   const [bootOut, setBootOut] = useState(false);
+  const [connectingVeil, setConnectingVeil] = useState(initialPosts.length === 0);
+  const [connectingOut, setConnectingOut] = useState(false);
 
   const resumeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lockHideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const idleLockTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const useClientFetchRef = useRef(false);
 
-  const current = posts[index] ?? posts[0];
+  const current = posts[index] ?? posts[0] ?? null;
 
   // Persisting setter for the lock state.
   const setLockedPersist = useCallback(
@@ -168,6 +170,15 @@ export function Kiosk({ initialPosts }: { initialPosts: NewsItem[] }) {
     };
   }, []);
 
+  // Connecting veil transition: once posts are loaded, fade out smoothly.
+  useEffect(() => {
+    if (posts.length > 0 && connectingVeil) {
+      setConnectingOut(true);
+      const t = setTimeout(() => setConnectingVeil(false), 500);
+      return () => clearTimeout(t);
+    }
+  }, [posts.length, connectingVeil]);
+
   // --- Interaction: freeze motion, reveal + shake lock when locked --------
   const handleInteract = useCallback(
     (e: React.PointerEvent) => {
@@ -225,15 +236,13 @@ export function Kiosk({ initialPosts }: { initialPosts: NewsItem[] }) {
       : [],
   );
 
-  if (!current) {
-    return <EmptyState />;
-  }
-
   return (
     <main
       onPointerDown={handleInteract}
       className="kiosk-surface relative mx-auto flex h-[100dvh] w-full max-w-[1080px] flex-col overflow-hidden bg-gradient-to-b from-kendari-deep to-kendari-deepblue"
     >
+      {current && (
+        <>
       {/* ---- Header (opaque top bar — no longer covers the photo) ---- */}
       <Header headlines={posts.map((p) => p.title)} paused={paused} />
 
@@ -249,7 +258,7 @@ export function Kiosk({ initialPosts }: { initialPosts: NewsItem[] }) {
             >
               {post.imageUrl ? (
                 <div
-                  className={`h-full w-full ${i === index ? "animate-ken-burns" : ""}`}
+                  className={`h-full w-full ${i === index ? (i % 2 === 0 ? "animate-ken-burns-in" : "animate-ken-burns-out") : ""}`}
                   style={{ animationPlayState: paused ? "paused" : "running" }}
                 >
                   <Image
@@ -375,6 +384,20 @@ export function Kiosk({ initialPosts }: { initialPosts: NewsItem[] }) {
           aria-hidden
         >
           <LoadingScreen />
+        </div>
+      )}
+        </>
+      )}
+
+      {/* ---- Connecting Veil (Smooth fade out) ---- */}
+      {connectingVeil && (
+        <div
+          className={`fixed inset-0 z-[90] transition-opacity duration-500 ease-out ${
+            connectingOut ? "pointer-events-none opacity-0" : "opacity-100"
+          }`}
+          aria-hidden
+        >
+          <EmptyState />
         </div>
       )}
     </main>

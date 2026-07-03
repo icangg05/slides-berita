@@ -9,10 +9,14 @@ services:
       context: .
       dockerfile: Dockerfile.dev
     container_name: kendari-kiosk-dev
+    tty: true
+    stdin_open: true
+    command: ["sh", "-c", "npm install --no-audit --no-fund && exec npm run dev"]
     ports:
       # host:container — host 3003 (3001/3002 sudah terpakai), container tetap 3000
       - "3003:3000"
     environment:
+      - CI=true
       - NODE_ENV=development
       - WATCHPACK_POLLING=true
       - CHOKIDAR_USEPOLLING=true

@@ -25,7 +25,7 @@ export function Header({
           </div>
           <div className="min-w-0 leading-tight">
             <p className="font-heading text-base font-extrabold tracking-tight text-white sm:text-xl lg:text-3xl">
-              Pemerintah Kota Kendari
+              Kota Kendari
             </p>
             <p className="mt-0.5 line-clamp-2 max-w-[15rem] text-[0.72rem] font-medium text-blue-100/85 sm:max-w-sm sm:text-sm lg:mt-1 lg:max-w-md lg:text-lg">
               Dinas Komunikasi dan Informatika

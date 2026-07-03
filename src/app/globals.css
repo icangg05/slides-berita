@@ -82,7 +82,8 @@
   --animate-fade-in: fade-in 900ms ease-out both;
   --animate-rise-in: rise-in 900ms cubic-bezier(0.16, 1, 0.3, 1) both;
   /* Slow, calm zoom that eases IN then back OUT, forever (alternate). */
-  --animate-ken-burns: ken-burns 14s ease-in-out infinite alternate;
+  --animate-ken-burns-in: ken-burns-in 14s ease-in-out infinite alternate;
+  --animate-ken-burns-out: ken-burns-out 14s ease-in-out infinite alternate;
   --animate-marquee: marquee 160s linear infinite; /* very calm ticker */
   --animate-soft-pulse: soft-pulse 2.4s ease-in-out infinite;
   --animate-lock-nudge: lock-nudge 620ms ease-in-out;
@@ -147,12 +148,21 @@
 }
 
 /* Alternate direction turns this into zoom-in → zoom-out → zoom-in … */
-@keyframes ken-burns {
+@keyframes ken-burns-in {
   from {
     transform: scale(1.04) translate3d(0, 0, 0);
   }
   to {
     transform: scale(1.16) translate3d(-1%, -2%, 0);
+  }
+}
+
+@keyframes ken-burns-out {
+  from {
+    transform: scale(1.16) translate3d(-1%, -2%, 0);
+  }
+  to {
+    transform: scale(1.04) translate3d(0, 0, 0);
   }
 }
 
