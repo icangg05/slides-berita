@@ -13,7 +13,7 @@ import { LoadingScreen } from "./LoadingScreen";
 import { fetchPost, fetchPosts } from "@/lib/wp";
 import { BeritaMissing } from "./BeritaMissing";
 
-const RESUME_IDLE_MS = 4000; // resume auto-scroll this long after last touch.
+const RESUME_IDLE_MS = 2000; // resume auto-scroll this long after last touch.
 const AUTO_SCROLL_PXPS = 40; // auto-scroll speed (px / second).
 const START_DELAY_MS = 1600; // let the reader see the top before scrolling.
 const NEXT_COUNTDOWN = 10; // seconds at the end before the next article.
