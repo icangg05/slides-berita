@@ -10,6 +10,8 @@ import { Footer } from "./Footer";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { LoadingScreen } from "./LoadingScreen";
+import { fetchPost, fetchPosts } from "@/lib/wp";
+import { BeritaMissing } from "./BeritaMissing";
 
 const RESUME_IDLE_MS = 4000; // resume auto-scroll this long after last touch.
 const AUTO_SCROLL_PXPS = 40; // auto-scroll speed (px / second).
@@ -26,14 +28,21 @@ const NEXT_COUNTDOWN = 10; // seconds at the end before the next article.
  *  • At the end, a 10-second countdown advances to the next berita.
  */
 export function DetailView({
-  post,
-  nextId,
+  postId,
+  initialPost,
+  initialNextId,
 }: {
-  post: NewsItem;
-  nextId: number | null;
+  postId: number;
+  initialPost: NewsItem | null;
+  initialNextId: number | null;
 }) {
   const router = useRouter();
   const scrollRef = useRef<HTMLDivElement | null>(null);
+
+  const [post, setPost] = useState<NewsItem | null>(initialPost);
+  const [nextId, setNextId] = useState<number | null>(initialNextId);
+  const [clientLoading, setClientLoading] = useState(!initialPost);
+  const [clientError, setClientError] = useState(false);
 
   const [interacting, setInteracting] = useState(false);
   const [atEnd, setAtEnd] = useState(false);
@@ -46,14 +55,53 @@ export function DetailView({
   // article doesn't pop in abruptly.
   const [showVeil, setShowVeil] = useState(true);
   const [veilOut, setVeilOut] = useState(false);
+
+  // Client side fetch if not loaded server-side (fallback for Vercel blocking)
   useEffect(() => {
+    if (post) return;
+
+    async function loadPostClient() {
+      try {
+        setClientLoading(true);
+        const [fetchedPost, fetchedList] = await Promise.all([
+          fetchPost(postId),
+          fetchPosts(),
+        ]);
+        if (!fetchedPost) {
+          setClientError(true);
+          return;
+        }
+        setPost(fetchedPost);
+        const idx = fetchedList.findIndex((p) => p.id === postId);
+        const computedNextId =
+          fetchedList.length > 0
+            ? idx >= 0
+              ? fetchedList[(idx + 1) % fetchedList.length].id
+              : fetchedList[0].id
+            : null;
+        setNextId(computedNextId);
+      } catch (err) {
+        console.error("Client detail fetch error:", err);
+        setClientError(true);
+      } finally {
+        setClientLoading(false);
+      }
+    }
+
+    loadPostClient();
+  }, [postId, post]);
+
+  // Loading veil timing: hold ~450ms, then fade out over ~700ms.
+  // Wait until clientLoading is done if it is fetching client-side.
+  useEffect(() => {
+    if (clientLoading) return;
     const t1 = setTimeout(() => setVeilOut(true), 450);
     const t2 = setTimeout(() => setShowVeil(false), 450 + 700);
     return () => {
       clearTimeout(t1);
       clearTimeout(t2);
     };
-  }, []);
+  }, [clientLoading]);
 
   // Refs mirror state so the rAF loop / listeners read fresh values.
   const interactingRef = useRef(false);
@@ -179,6 +227,18 @@ export function DetailView({
   const scrollToTop = useCallback(() => {
     scrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
   }, []);
+
+  if (clientError) {
+    return <BeritaMissing />;
+  }
+
+  if (!post) {
+    return (
+      <main className="relative mx-auto flex h-[100dvh] w-full max-w-[1080px] select-none flex-col overflow-hidden bg-kendari-slate text-kendari-deep">
+        <LoadingScreen />
+      </main>
+    );
+  }
 
   return (
     <main className="relative mx-auto flex h-[100dvh] w-full max-w-[1080px] select-none flex-col overflow-hidden bg-kendari-slate text-kendari-deep">

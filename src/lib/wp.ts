@@ -1,4 +1,3 @@
-import "server-only";
 import type { NewsItem } from "./types";
 
 /**
@@ -11,7 +10,7 @@ import type { NewsItem } from "./types";
  */
 
 const WP_API_BASE =
-  process.env.WP_API_BASE?.replace(/\/$/, "") ??
+  (typeof window === "undefined" ? process.env.WP_API_BASE : null)?.replace(/\/$/, "") ??
   "https://berita.kendarikota.go.id/wp-json/wp/v2";
 
 /** How many headlines the slideshow rotates through (PRD F-01: 20). */

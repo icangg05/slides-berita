@@ -19,16 +19,25 @@ export default async function BeritaDetailPage({
 
   // Fetch the article and the current headline list in parallel — the list
   // lets us compute the "next berita" for the end-of-article auto-advance.
-  const [post, list] = await Promise.all([fetchPost(postId), fetchPosts()]);
-  if (!post) return <BeritaMissing />;
+  // Catch errors so server rendering doesn't crash, allowing the client to fetch.
+  const [post, list] = await Promise.all([
+    fetchPost(postId).catch(() => null),
+    fetchPosts().catch(() => []),
+  ]);
 
-  const idx = list.findIndex((p) => p.id === postId);
+  const idx = list ? list.findIndex((p) => p.id === postId) : -1;
   const nextId =
-    list.length > 0
+    list && list.length > 0
       ? idx >= 0
         ? list[(idx + 1) % list.length].id
         : list[0].id
       : null;
 
-  return <DetailView post={post} nextId={nextId} />;
+  return (
+    <DetailView
+      postId={postId}
+      initialPost={post}
+      initialNextId={nextId}
+    />
+  );
 }

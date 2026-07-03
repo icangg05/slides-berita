@@ -13,6 +13,7 @@ import { Badge } from "./ui/badge";
 import { Card } from "./ui/card";
 import { Button } from "./ui/button";
 import { LoadingScreen } from "./LoadingScreen";
+import { fetchPosts } from "@/lib/wp";
 
 const SLIDE_MS = 9000; // PRD F-01: 8–10s per slide.
 const POLL_MS = 5 * 60 * 1000; // PRD §6: refresh headlines every ~5 min.
@@ -53,6 +54,7 @@ export function Kiosk({ initialPosts }: { initialPosts: NewsItem[] }) {
   const resumeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lockHideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const idleLockTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const useClientFetchRef = useRef(false);
 
   const current = posts[index] ?? posts[0];
 
@@ -95,16 +97,46 @@ export function Kiosk({ initialPosts }: { initialPosts: NewsItem[] }) {
     };
   }, [armIdleLock]);
 
+  // --- Client-side fallback fetch on mount if initialPosts is empty --------
+  useEffect(() => {
+    if (posts.length > 0) return;
+
+    async function loadInitialPostsClient() {
+      try {
+        const fetched = await fetchPosts();
+        if (fetched && fetched.length > 0) {
+          useClientFetchRef.current = true;
+          setPosts(fetched);
+        }
+      } catch (err) {
+        console.error("Client initial fetch error:", err);
+      }
+    }
+    loadInitialPostsClient();
+  }, [posts.length]);
+
   // --- Background refresh (live newsroom) ---------------------------------
   useEffect(() => {
     const id = setInterval(async () => {
       try {
-        const res = await fetch("/api/posts", { cache: "no-store" });
-        if (!res.ok) return;
-        const data = (await res.json()) as { posts?: NewsItem[] };
-        if (data.posts?.length) {
+        let fetched: NewsItem[] = [];
+        if (posts.length === 0 || useClientFetchRef.current) {
+          fetched = await fetchPosts();
+        } else {
+          const res = await fetch("/api/posts", { cache: "no-store" });
+          if (res.ok) {
+            const data = (await res.json()) as { posts?: NewsItem[] };
+            fetched = data.posts ?? [];
+          } else {
+            // If server-side api fails, switch to direct client fetch
+            useClientFetchRef.current = true;
+            fetched = await fetchPosts();
+          }
+        }
+
+        if (fetched && fetched.length > 0) {
           setPosts((prev) =>
-            sameOrder(prev, data.posts!) ? prev : data.posts!,
+            sameOrder(prev, fetched) ? prev : fetched,
           );
         }
       } catch {
@@ -112,7 +144,7 @@ export function Kiosk({ initialPosts }: { initialPosts: NewsItem[] }) {
       }
     }, POLL_MS);
     return () => clearInterval(id);
-  }, []);
+  }, [posts.length]);
 
   useEffect(() => {
     if (index >= posts.length && posts.length > 0) setIndex(0);
