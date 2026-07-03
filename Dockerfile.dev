@@ -1,0 +1,29 @@
+# =============================================================================
+# Development image — PRD §3.1: hot reload via bind-mounted source.
+# The source directory is mounted at runtime (see docker-compose.yml), so we
+# only need the toolchain + dependencies baked in here.
+# =============================================================================
+FROM node:20-alpine
+WORKDIR /app
+RUN apk add --no-cache libc6-compat
+
+# Install deps first so they cache independently of source edits.
+COPY package.json package-lock.json* ./
+RUN npm install
+
+# Source is bind-mounted over /app in compose; this COPY is just a sane default
+# for running the image standalone without a mount.
+COPY . .
+
+ENV NEXT_TELEMETRY_DISABLED=1
+# Poll the filesystem so edits on the host reliably trigger reloads inside the
+# container (bind mounts don't always forward inotify events on all hosts).
+ENV WATCHPACK_POLLING=true
+ENV CHOKIDAR_USEPOLLING=true
+
+EXPOSE 3000
+# Sync dependencies on start, THEN run dev. Because compose keeps node_modules
+# in an anonymous volume (to avoid host/container arch clashes), a newly added
+# package.json dependency would otherwise stay missing until the volume is
+# recreated. Running install first makes the dev container self-heal.
+CMD ["sh", "-c", "npm install --no-audit --no-fund && npm run dev"]

@@ -1,0 +1,21 @@
+# =============================================================================
+# Production environment (PRD §3.2) — optimised multi-stage build (default file).
+#   Run:  docker compose up --build -d
+#   Open: http://localhost:3003  (point the kiosk browser here, kiosk/portrait)
+#   Dev:  docker compose -f docker-compose.dev.yml up --build
+# =============================================================================
+services:
+  kiosk:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: kendari-kiosk
+    ports:
+      # host:container — host 3003 (3001/3002 sudah terpakai), container tetap 3000
+      - "3003:3000"
+    environment:
+      - NODE_ENV=production
+      - NEXT_TELEMETRY_DISABLED=1
+      # Override the newsroom endpoint here if it ever changes:
+      # - WP_API_BASE=https://berita.kendarikota.go.id/wp-json/wp/v2
+    restart: always

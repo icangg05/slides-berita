@@ -1,0 +1,26 @@
+# =============================================================================
+# Development environment (PRD §3.1) — hot reload with bind-mounted source.
+#   Run:  docker compose -f docker-compose.dev.yml up --build
+#   Open: http://localhost:3003
+# =============================================================================
+services:
+  kiosk-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: kendari-kiosk-dev
+    ports:
+      # host:container — host 3003 (3001/3002 sudah terpakai), container tetap 3000
+      - "3003:3000"
+    environment:
+      - NODE_ENV=development
+      - WATCHPACK_POLLING=true
+      - CHOKIDAR_USEPOLLING=true
+    volumes:
+      # Map the local project into the container for live code changes …
+      - ./:/app
+      # … but keep the container's own node_modules and .next (anonymous
+      # volumes) so host/container platform differences don't clash.
+      - /app/node_modules
+      - /app/.next
+    restart: unless-stopped
