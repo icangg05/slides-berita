@@ -26,10 +26,15 @@ export default async function BeritaDetailPage({
   ]);
 
   const idx = list ? list.findIndex((p) => p.id === postId) : -1;
+  // null next == "no next article" -> the detail view returns to the home
+  // slideshow. We deliberately do NOT wrap: the LAST article goes home rather
+  // than cycling back to the first.
   const nextId =
     list && list.length > 0
       ? idx >= 0
-        ? list[(idx + 1) % list.length].id
+        ? idx < list.length - 1
+          ? list[idx + 1].id
+          : null // last article -> home
         : list[0].id
       : null;
 

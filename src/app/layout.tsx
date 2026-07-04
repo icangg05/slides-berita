@@ -23,6 +23,11 @@ export const metadata: Metadata = {
   description:
     "Papan informasi digital berita terkini Kota Kendari — dikelola oleh Dinas Komunikasi dan Informatika Kota Kendari.",
   robots: { index: false, follow: false },
+  icons: {
+    icon: "/Lambang_Kota_Kendari.webp",
+    shortcut: "/Lambang_Kota_Kendari.webp",
+    apple: "/Lambang_Kota_Kendari.webp",
+  },
 };
 
 // Locked portrait signage viewport — no user zoom on the kiosk panel.

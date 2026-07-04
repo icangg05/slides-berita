@@ -3,7 +3,7 @@
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, ArrowUp, X, ZoomIn } from "lucide-react";
+import { ArrowLeft, ArrowRight, ArrowUp, X } from "lucide-react";
 import type { NewsItem } from "@/lib/types";
 import { Logo } from "./Logo";
 import { Footer } from "./Footer";
@@ -17,6 +17,7 @@ const RESUME_IDLE_MS = 2000; // resume auto-scroll this long after last touch.
 const AUTO_SCROLL_PXPS = 40; // auto-scroll speed (px / second).
 const START_DELAY_MS = 1600; // let the reader see the top before scrolling.
 const NEXT_COUNTDOWN = 10; // seconds at the end before the next article.
+const SCROLL_RAMP_MS = 1400; // ease the scroll speed up from 0 → full so it never jerks into motion.
 
 /**
  * Interactive article reader (PRD F-02, extended).
@@ -37,7 +38,9 @@ export function DetailView({
   initialNextId: number | null;
 }) {
   const router = useRouter();
-  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null); // the clipping viewport
+  const contentRef = useRef<HTMLDivElement | null>(null); // the translated content
+  const posRef = useRef(0); // current scroll offset in px (float, we own it)
 
   const [post, setPost] = useState<NewsItem | null>(initialPost);
   const [nextId, setNextId] = useState<number | null>(initialNextId);
@@ -73,10 +76,13 @@ export function DetailView({
         }
         setPost(fetchedPost);
         const idx = fetchedList.findIndex((p) => p.id === postId);
+        // No wrap: the LAST article yields null -> goNext() returns home.
         const computedNextId =
           fetchedList.length > 0
             ? idx >= 0
-              ? fetchedList[(idx + 1) % fetchedList.length].id
+              ? idx < fetchedList.length - 1
+                ? fetchedList[idx + 1].id
+                : null // last article -> home
               : fetchedList[0].id
             : null;
         setNextId(computedNextId);
@@ -107,6 +113,7 @@ export function DetailView({
   const interactingRef = useRef(false);
   const lightboxRef = useRef(false);
   const startedRef = useRef(false);
+  const holdingRef = useRef(false); // true while a finger/pointer is held down.
   const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -135,49 +142,109 @@ export function DetailView({
   }, []);
 
   // --- Auto-scroll loop + interaction listeners ---------------------------
+  // We move the article with a GPU-composited transform instead of the native
+  // scrollTop. scrollTop changes force a repaint of the whole scrollport each
+  // frame (janky with big images) and snap to whole pixels (stutter at slow
+  // speed). A translate3d layer is composited sub-pixel with no repaint — so
+  // the crawl is smooth. Because we now own the position, manual input (drag /
+  // wheel) is applied to the same offset.
   useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
+    const viewport = scrollRef.current;
+    const content = contentRef.current;
+    if (!viewport || !content) return;
 
     let raf = 0;
     let last = performance.now();
+    let rampStart = 0; // when the current run of motion began (speed ramp).
+    let wasScrolling = false;
     const startT = setTimeout(() => {
       startedRef.current = true;
     }, START_DELAY_MS);
 
+    const maxScroll = () =>
+      Math.max(0, content.offsetHeight - viewport.clientHeight);
+
+    const apply = (p: number) => {
+      posRef.current = p;
+      content.style.transform = `translate3d(0, ${-p}px, 0)`;
+    };
+
     const loop = (now: number) => {
       const dt = Math.min((now - last) / 1000, 0.05);
       last = now;
-      const max = el.scrollHeight - el.clientHeight;
-      if (
+      const max = maxScroll();
+      if (posRef.current > max) apply(max); // content re-measured shorter
+      const canScroll =
         startedRef.current &&
+        !holdingRef.current &&
         !interactingRef.current &&
         !lightboxRef.current &&
-        el.scrollTop < max - 0.5
-      ) {
-        el.scrollTop = Math.min(max, el.scrollTop + AUTO_SCROLL_PXPS * dt);
+        posRef.current < max - 0.5;
+
+      if (canScroll) {
+        // Ease speed up from 0 with an ease-in curve each time motion restarts —
+        // a gentle acceleration instead of an instant lurch.
+        if (!wasScrolling) {
+          rampStart = now;
+          wasScrolling = true;
+        }
+        const t = Math.min((now - rampStart) / SCROLL_RAMP_MS, 1);
+        const speed = AUTO_SCROLL_PXPS * t * t; // t² = accelerate from rest
+        apply(Math.min(max, posRef.current + speed * dt));
+      } else {
+        wasScrolling = false; // paused → next resume ramps up again
       }
-      const end = max <= 2 || el.scrollTop >= max - 2;
+
+      const end = max <= 2 || posRef.current >= max - 2;
       setAtEnd((prev) => (prev === end ? prev : end));
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
 
-    const events: Array<keyof HTMLElementEventMap> = [
-      "wheel",
-      "touchstart",
-      "touchmove",
-      "pointerdown",
-    ];
-    events.forEach((e) =>
-      el.addEventListener(e, markInteract, { passive: true }),
-    );
+    // Manual input. Holding (pointer down) hard-pauses the auto-scroll and lets
+    // the reader drag; releasing settles then resumes. Wheel nudges the offset.
+    let dragStartY = 0;
+    let dragStartPos = 0;
+
+    const onPointerDown = (e: PointerEvent) => {
+      holdingRef.current = true;
+      setInteracting(true);
+      interactingRef.current = true;
+      if (idleTimer.current) clearTimeout(idleTimer.current);
+      dragStartY = e.clientY;
+      dragStartPos = posRef.current;
+    };
+    const onPointerMove = (e: PointerEvent) => {
+      if (!holdingRef.current) return;
+      apply(
+        Math.max(0, Math.min(maxScroll(), dragStartPos - (e.clientY - dragStartY))),
+      );
+    };
+    const onPointerUp = () => {
+      if (!holdingRef.current) return;
+      holdingRef.current = false;
+      markInteract(); // settle, then ease back into motion
+    };
+    const onWheel = (e: WheelEvent) => {
+      apply(Math.max(0, Math.min(maxScroll(), posRef.current + e.deltaY)));
+      markInteract();
+    };
+
+    viewport.addEventListener("pointerdown", onPointerDown, { passive: true });
+    window.addEventListener("pointermove", onPointerMove, { passive: true });
+    window.addEventListener("pointerup", onPointerUp, { passive: true });
+    window.addEventListener("pointercancel", onPointerUp, { passive: true });
+    viewport.addEventListener("wheel", onWheel, { passive: true });
     window.addEventListener("keydown", markInteract);
 
     return () => {
       cancelAnimationFrame(raf);
       clearTimeout(startT);
-      events.forEach((e) => el.removeEventListener(e, markInteract));
+      viewport.removeEventListener("pointerdown", onPointerDown);
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+      window.removeEventListener("pointercancel", onPointerUp);
+      viewport.removeEventListener("wheel", onWheel);
       window.removeEventListener("keydown", markInteract);
       if (idleTimer.current) clearTimeout(idleTimer.current);
     };
@@ -225,8 +292,23 @@ export function DetailView({
   }, []);
 
   const scrollToTop = useCallback(() => {
-    scrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
-  }, []);
+    const content = contentRef.current;
+    if (!content) return;
+    // Freeze the auto-scroll and glide back to the top with a CSS transition
+    // (the loop won't overwrite the transform while held), then resume.
+    holdingRef.current = true;
+    setInteracting(true);
+    interactingRef.current = true;
+    if (idleTimer.current) clearTimeout(idleTimer.current);
+    content.style.transition = "transform 500ms ease";
+    content.style.transform = "translate3d(0, 0, 0)";
+    posRef.current = 0;
+    window.setTimeout(() => {
+      content.style.transition = "";
+      holdingRef.current = false;
+      markInteract();
+    }, 520);
+  }, [markInteract]);
 
   if (clientError) {
     return <BeritaMissing />;
@@ -275,7 +357,12 @@ export function DetailView({
            end-of-article overlay never changes its height (which would make
            "at end" flip on/off and flicker the countdown). */}
       <div className="relative min-h-0 flex-1">
-        <div ref={scrollRef} className="detail-scroll absolute inset-0">
+        <div
+          ref={scrollRef}
+          className="absolute inset-0 overflow-hidden"
+          style={{ touchAction: "none" }}
+        >
+        <div ref={contentRef} className="will-change-transform">
         {/* Hero — tap to enlarge */}
         <button
           type="button"
@@ -308,11 +395,6 @@ export function DetailView({
           >
             {post.category}
           </Badge>
-          {post.imageUrl && (
-            <span className="absolute right-4 top-4 grid size-9 place-items-center rounded-full bg-black/40 text-white backdrop-blur-sm lg:right-8 lg:top-6 lg:size-11">
-              <ZoomIn className="size-5 lg:size-6" />
-            </span>
-          )}
         </button>
 
         {/* Body — extra bottom padding leaves room for the countdown overlay */}
@@ -350,6 +432,7 @@ export function DetailView({
           </div>
         </article>
         </div>
+        </div>
 
         {/* ---- End-of-article "next berita" countdown (overlay) ---- */}
         {countdown !== null && (
@@ -361,7 +444,7 @@ export function DetailView({
               </span>
               <div className="leading-tight">
                 <p className="font-heading text-sm font-bold sm:text-base lg:text-xl">
-                  Berita selanjutnya
+                  {nextId == null ? "Kembali ke beranda" : "Berita selanjutnya"}
                 </p>
                 <p className="text-xs text-blue-100/70 lg:text-sm">
                   Sentuh untuk terus membaca
@@ -373,7 +456,7 @@ export function DetailView({
               variant="glass"
               className="h-10 gap-2 rounded-full px-4 font-heading text-sm font-bold lg:h-12 lg:px-6 lg:text-base"
             >
-              Lihat sekarang
+              {nextId == null ? "Ke beranda" : "Lihat sekarang"}
               <ArrowRight className="size-4 lg:size-5" />
             </Button>
           </div>

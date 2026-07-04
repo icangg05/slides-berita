@@ -15,7 +15,7 @@ import { Button } from "./ui/button";
 import { LoadingScreen } from "./LoadingScreen";
 import { fetchPosts } from "@/lib/wp";
 
-const SLIDE_MS = 9000; // PRD F-01: 8–10s per slide.
+const SLIDE_MS = 11000; // ~11s: comfortable read time for title + excerpt, with headroom for mid-slide arrivals.
 const POLL_MS = 5 * 60 * 1000; // PRD §6: refresh headlines every ~5 min.
 const RESUME_MS = 2000; // resume motion this long after the last touch.
 const LOCK_REVEAL_MS = 4000; // keep the lock icon shown this long after a tap.
@@ -199,6 +199,11 @@ export function Kiosk({ initialPosts }: { initialPosts: NewsItem[] }) {
 
       if (onLockBtn) return; // lock interactions don't freeze the slideshow
 
+      // While LOCKED the display is "hands-off": keep the ticker, slides and
+      // image zoom moving no matter what is tapped. Only a visitor on an
+      // UNLOCKED screen (actively reading) freezes the motion briefly.
+      if (locked) return;
+
       setPaused(true);
       if (resumeTimer.current) clearTimeout(resumeTimer.current);
       resumeTimer.current = setTimeout(() => setPaused(false), RESUME_MS);
@@ -252,13 +257,31 @@ export function Kiosk({ initialPosts }: { initialPosts: NewsItem[] }) {
           {posts.map((post, i) => (
             <div
               key={post.id}
-              className="absolute inset-0 transition-opacity duration-[1200ms] ease-in-out"
+              // Mobile: the photo is anchored to the top and runs DOWN to
+              // ~62% of the hero so its lower edge tucks under the glass card —
+              // no gap between them. Height scales with the hero, so it stays
+              // gapless on both tall and short phones. `photo-fade-b` softly
+              // dissolves the bottom edge; overflow-hidden CLIPS the zoom so it
+              // stays inside the frame and never looks pre-zoomed. Desktop: full-bleed.
+              className="photo-fade-b absolute inset-x-0 top-0 h-[62%] overflow-hidden transition-opacity duration-[1200ms] ease-in-out lg:inset-0 lg:h-auto"
               style={{ opacity: i === index ? 1 : 0 }}
               aria-hidden={i !== index}
             >
               {post.imageUrl ? (
                 <div
-                  className={`h-full w-full ${i === index ? (i % 2 === 0 ? "animate-ken-burns-in" : "animate-ken-burns-out") : ""}`}
+                  // Active slide runs the dolly; INACTIVE slides hold the exact
+                  // transform their dolly ends on (rest-*), so an outgoing slide
+                  // never snaps back to scale 1 mid-crossfade — the motion stays
+                  // continuous whichever way the neighbours zoom.
+                  className={`h-full w-full ${
+                    i === index
+                      ? i % 2 === 0
+                        ? "animate-ken-burns-in"
+                        : "animate-ken-burns-out"
+                      : i % 2 === 0
+                        ? "ken-burns-rest-in"
+                        : "ken-burns-rest-out"
+                  }`}
                   style={{ animationPlayState: paused ? "paused" : "running" }}
                 >
                   <Image
