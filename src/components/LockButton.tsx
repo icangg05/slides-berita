@@ -30,6 +30,15 @@ export function LockButton({
   const startRef = useRef<number>(0);
   const firedRef = useRef(false);
 
+  // "Padlock released" burst: bumped when a hold actually UNLOCKS the screen,
+  // so the moment is obvious even while a thumb covers the icon (the radiating
+  // ring and the floating label appear AROUND / ABOVE the finger). Tied to the
+  // hold action (not the `locked` prop) so restoring an unlocked state on load
+  // never triggers a stray burst.
+  const [unlockTick, setUnlockTick] = useState(0);
+  // Mirror burst for LOCKING: rings converge inward + a "Layar terkunci" label.
+  const [lockTick, setLockTick] = useState(0);
+
   const stopHold = useCallback(() => {
     if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
     rafRef.current = null;
@@ -44,6 +53,9 @@ export function LockButton({
       if (p >= 1) {
         if (!firedRef.current) {
           firedRef.current = true;
+          // Currently locked → UNLOCKING (release burst); else → LOCKING burst.
+          if (locked) setUnlockTick((t) => t + 1);
+          else setLockTick((t) => t + 1);
           onToggle();
         }
         stopHold();
@@ -51,7 +63,7 @@ export function LockButton({
       }
       rafRef.current = requestAnimationFrame(tick);
     },
-    [onToggle, stopHold],
+    [locked, onToggle, stopHold],
   );
 
   const startHold = useCallback(() => {
@@ -76,6 +88,7 @@ export function LockButton({
       : "pointer-events-none scale-90 bg-white/10 opacity-0";
 
   return (
+    <>
     <button
       type="button"
       data-lockbtn
@@ -124,10 +137,18 @@ export function LockButton({
         />
       </svg>
 
-      {/* Glyph — remounts on each hintTick to replay the shake animation. */}
+      {/* Glyph — remounts on hintTick (shake) or unlockTick (pop) to replay. */}
       <span
-        key={hintTick}
-        className={`grid place-items-center ${hintTick > 0 ? "animate-lock-nudge" : ""}`}
+        key={`${hintTick}-${unlockTick}`}
+        className={`grid place-items-center ${
+          locked
+            ? hintTick > 0
+              ? "animate-lock-nudge"
+              : ""
+            : unlockTick > 0
+              ? "animate-unlock-pop"
+              : ""
+        }`}
       >
         {locked ? (
           <Lock className="size-6 text-white lg:size-7" strokeWidth={2.5} />
@@ -136,5 +157,39 @@ export function LockButton({
         )}
       </span>
     </button>
+
+    {/* Unlock burst — a SIBLING of the button (so the button's own fade to
+        45% opacity doesn't dim it). Matches the button's fixed spot; rings
+        radiate past a covering thumb and the label rises above it. */}
+    {unlockTick > 0 && (
+      <div
+        key={unlockTick}
+        aria-hidden
+        className="pointer-events-none fixed bottom-4 right-4 z-[55] grid size-16 place-items-center lg:bottom-6 lg:right-6 lg:size-20"
+      >
+        <span className="animate-unlock-ring absolute inset-0 rounded-full border-2 border-white" />
+        <span className="animate-unlock-ring absolute inset-0 rounded-full border-2 border-kendari-sky [animation-delay:130ms]" />
+        <span className="animate-unlock-label absolute bottom-full right-0 mb-3 whitespace-nowrap rounded-full bg-kendari-deep/90 px-3 py-1 font-heading text-xs font-bold text-white ring-1 ring-white/25 backdrop-blur-md">
+          Layar terbuka
+        </span>
+      </div>
+    )}
+
+    {/* Lock burst — rings converge inward (securing) + a "Layar terkunci"
+        label. A sibling too, so it stays visible even as the button hides. */}
+    {lockTick > 0 && (
+      <div
+        key={`lock-${lockTick}`}
+        aria-hidden
+        className="pointer-events-none fixed bottom-4 right-4 z-[55] grid size-16 place-items-center lg:bottom-6 lg:right-6 lg:size-20"
+      >
+        <span className="animate-lock-ring absolute inset-0 rounded-full border-2 border-white" />
+        <span className="animate-lock-ring absolute inset-0 rounded-full border-2 border-kendari-sky [animation-delay:120ms]" />
+        <span className="animate-unlock-label absolute bottom-full right-0 mb-3 whitespace-nowrap rounded-full bg-kendari-deep/90 px-3 py-1 font-heading text-xs font-bold text-white ring-1 ring-white/25 backdrop-blur-md">
+          Layar terkunci
+        </span>
+      </div>
+    )}
+    </>
   );
 }

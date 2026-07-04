@@ -201,15 +201,23 @@ export function Kiosk({ initialPosts }: { initialPosts: NewsItem[] }) {
 
       // While LOCKED the display is "hands-off": keep the ticker, slides and
       // image zoom moving no matter what is tapped. Only a visitor on an
-      // UNLOCKED screen (actively reading) freezes the motion briefly.
+      // UNLOCKED screen (actively reading) freezes the motion.
       if (locked) return;
 
+      // Hold to pause: freeze now and KEEP it frozen while the finger is down —
+      // no timer resumes it mid-hold. Release (handleRelease) arms the resume.
       setPaused(true);
       if (resumeTimer.current) clearTimeout(resumeTimer.current);
-      resumeTimer.current = setTimeout(() => setPaused(false), RESUME_MS);
     },
     [locked, armIdleLock],
   );
+
+  // Release: after the finger lifts, let the motion settle back after a short
+  // idle window (only relevant when unlocked — locked never paused).
+  const handleRelease = useCallback(() => {
+    if (resumeTimer.current) clearTimeout(resumeTimer.current);
+    resumeTimer.current = setTimeout(() => setPaused(false), RESUME_MS);
+  }, []);
 
   const advance = useCallback(() => {
     if (posts.length > 1) setIndex((i) => (i + 1) % posts.length);
@@ -244,6 +252,8 @@ export function Kiosk({ initialPosts }: { initialPosts: NewsItem[] }) {
   return (
     <main
       onPointerDown={handleInteract}
+      onPointerUp={handleRelease}
+      onPointerCancel={handleRelease}
       className="kiosk-surface relative mx-auto flex h-[100dvh] w-full max-w-[1080px] flex-col overflow-hidden bg-gradient-to-b from-kendari-deep to-kendari-deepblue"
     >
       {current && (
