@@ -17,7 +17,7 @@ import { fetchPosts } from "@/lib/wp";
 
 const SLIDE_MS = 11000; // ~11s: comfortable read time for title + excerpt, with headroom for mid-slide arrivals.
 const POLL_MS = 5 * 60 * 1000; // PRD §6: refresh headlines every ~5 min.
-const RESUME_MS = 2000; // resume motion this long after the last touch.
+const RESUME_MS = 1500; // resume motion this long after the last touch.
 const LOCK_REVEAL_MS = 4000; // keep the lock icon shown this long after a tap.
 const IDLE_LOCK_MS = 5 * 60 * 1000; // auto-lock after 5 min with no interaction.
 const LS_KEY = "kendari-kiosk-locked";
