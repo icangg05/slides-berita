@@ -28,7 +28,7 @@ export function Header({
               Kota Kendari
             </p>
             <p className="mt-0.5 line-clamp-2 max-w-[15rem] text-[0.72rem] font-medium text-blue-100/85 sm:max-w-sm sm:text-sm lg:mt-1 lg:max-w-md lg:text-lg">
-              Dinas Komunikasi dan Informatika
+              Dinas Komunikasi & Informatika
             </p>
           </div>
         </div>

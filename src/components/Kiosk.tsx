@@ -3,7 +3,7 @@
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, CalendarDays, User } from "lucide-react";
 import type { NewsItem } from "@/lib/types";
 import { Header } from "./Header";
 import { Footer } from "./Footer";
@@ -318,30 +318,16 @@ export function Kiosk({ initialPosts }: { initialPosts: NewsItem[] }) {
 
         {/* Glass content card — overlays the bottom of the photo */}
         <Card className="absolute inset-x-3 bottom-2 z-10 gap-0 rounded-2xl border-white/15 bg-white/10 p-4 py-4 text-left shadow-2xl backdrop-blur-md sm:inset-x-5 sm:p-6 lg:inset-x-6 lg:bottom-3 lg:rounded-3xl lg:p-8">
-          <div className="mb-2 flex flex-wrap items-center gap-2 lg:mb-4 lg:gap-3">
+          {/* Top row: category on the left, the primary CTA on the right.
+              (Date moved to the bottom row so this never wraps to two lines
+              on a small screen.) */}
+          <div className="mb-2 flex items-center justify-between gap-2 lg:mb-4 lg:gap-3">
             <Badge
               variant="default"
               className="px-3 py-1 font-heading text-[0.65rem] font-bold uppercase tracking-wide lg:px-4 lg:py-1.5 lg:text-sm"
             >
               {current.category}
             </Badge>
-            <span className="text-xs font-medium text-blue-100/80 sm:text-sm lg:text-base">
-              {current.dateLabel}
-            </span>
-          </div>
-
-          <h1 className="line-clamp-3 font-heading text-2xl font-extrabold leading-[1.1] tracking-tight text-white drop-shadow-md sm:text-3xl lg:text-[2.75rem]">
-            {current.title}
-          </h1>
-
-          <p className="mt-2 line-clamp-2 text-sm leading-relaxed text-blue-50/90 sm:text-base lg:mt-4 lg:line-clamp-4 lg:text-2xl">
-            {current.excerpt}
-          </p>
-
-          <div className="mt-3 flex items-center justify-between gap-2 lg:mt-6">
-            <span className="truncate text-xs font-medium text-blue-100/70 sm:text-sm lg:text-lg">
-              oleh {current.author}
-            </span>
             <Button
               type="button"
               onClick={openDetail}
@@ -355,6 +341,25 @@ export function Kiosk({ initialPosts }: { initialPosts: NewsItem[] }) {
               <span className="sm:hidden">Baca selengkapnya</span>
               <ArrowRight className="size-4 lg:size-5" />
             </Button>
+          </div>
+
+          <h1 className="line-clamp-3 font-heading text-2xl font-extrabold leading-[1.1] tracking-tight text-white drop-shadow-md sm:text-3xl lg:text-[2.75rem]">
+            {current.title}
+          </h1>
+
+          <p className="mt-2 line-clamp-2 text-sm leading-relaxed text-blue-50/90 sm:text-base lg:mt-4 lg:line-clamp-4 lg:text-2xl">
+            {current.excerpt}
+          </p>
+
+          <div className="mt-3 flex items-center justify-between gap-2 lg:mt-6">
+            <span className="flex min-w-0 items-center gap-1.5 text-xs font-medium text-blue-100/70 sm:text-sm lg:gap-2 lg:text-lg">
+              <User className="size-3.5 shrink-0 lg:size-5" strokeWidth={2.4} />
+              <span className="truncate">oleh {current.author}</span>
+            </span>
+            <span className="flex shrink-0 items-center gap-1.5 text-xs font-medium text-blue-100/80 sm:text-sm lg:gap-2 lg:text-base">
+              <CalendarDays className="size-3.5 shrink-0 lg:size-5" strokeWidth={2.4} />
+              {current.dateLabel}
+            </span>
           </div>
 
           {/* Auto-advance progress bar (also the autoplay timer). */}

@@ -248,7 +248,11 @@ export function DetailView({
       window.removeEventListener("keydown", markInteract);
       if (idleTimer.current) clearTimeout(idleTimer.current);
     };
-  }, [markInteract]);
+    // `post` is a dep so the loop/listeners are (re)attached once the article
+    // renders. On prod the server fetch can fail (post null on mount → the
+    // scroll DOM isn't there yet); when the client fetch fills `post` in, this
+    // re-runs and wires up scrolling. Without it, prod pages don't scroll.
+  }, [markInteract, post]);
 
   // --- Countdown to the next berita once idle at the end ------------------
   useEffect(() => {
@@ -346,7 +350,7 @@ export function DetailView({
               Kota Kendari
             </p>
             <p className="truncate text-[0.7rem] font-medium text-blue-100/85 sm:text-xs lg:text-sm">
-              Dinas Komunikasi dan Informatika
+              Dinas Komunikasi & Informatika
             </p>
           </div>
         </div>

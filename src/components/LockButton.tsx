@@ -82,7 +82,7 @@ export function LockButton({
   // Locked + revealed → same glass, fully shown, tappable.
   // Locked + hidden → faded out, not interactive.
   const stateClass = !locked
-    ? "cursor-pointer bg-white/10 opacity-45 ring-1 ring-white/20 backdrop-blur-md hover:opacity-95 active:opacity-100"
+    ? "cursor-pointer bg-white/5 opacity-25 ring-1 ring-white/20 backdrop-blur-md hover:opacity-95 active:opacity-100"
     : visible
       ? "cursor-pointer bg-white/10 opacity-100 ring-1 ring-white/25 backdrop-blur-md"
       : "pointer-events-none scale-90 bg-white/10 opacity-0";
@@ -105,7 +105,7 @@ export function LockButton({
       onPointerLeave={stopHold}
       onPointerCancel={stopHold}
       onContextMenu={(e) => e.preventDefault()}
-      className={`group fixed bottom-4 right-4 z-50 grid size-16 place-items-center rounded-full transition-all duration-300 lg:bottom-6 lg:right-6 lg:size-20 ${stateClass}`}
+      className={`group fixed right-4 top-4 z-50 grid size-16 place-items-center rounded-full transition-all duration-300 lg:right-6 lg:top-6 lg:size-20 ${stateClass}`}
       style={{ touchAction: "none" }}
     >
       {/* Hold-progress ring */}
@@ -165,11 +165,11 @@ export function LockButton({
       <div
         key={unlockTick}
         aria-hidden
-        className="pointer-events-none fixed bottom-4 right-4 z-[55] grid size-16 place-items-center lg:bottom-6 lg:right-6 lg:size-20"
+        className="pointer-events-none fixed right-4 top-4 z-[55] grid size-16 place-items-center lg:right-6 lg:top-6 lg:size-20"
       >
         <span className="animate-unlock-ring absolute inset-0 rounded-full border-2 border-white" />
         <span className="animate-unlock-ring absolute inset-0 rounded-full border-2 border-kendari-sky [animation-delay:130ms]" />
-        <span className="animate-unlock-label absolute bottom-full right-0 mb-3 whitespace-nowrap rounded-full bg-kendari-deep/90 px-3 py-1 font-heading text-xs font-bold text-white ring-1 ring-white/25 backdrop-blur-md">
+        <span className="animate-unlock-label absolute right-0 top-full mt-3 whitespace-nowrap rounded-full bg-kendari-deep/90 px-3 py-1 font-heading text-xs font-bold text-white ring-1 ring-white/25 backdrop-blur-md">
           Layar terbuka
         </span>
       </div>
@@ -181,11 +181,11 @@ export function LockButton({
       <div
         key={`lock-${lockTick}`}
         aria-hidden
-        className="pointer-events-none fixed bottom-4 right-4 z-[55] grid size-16 place-items-center lg:bottom-6 lg:right-6 lg:size-20"
+        className="pointer-events-none fixed right-4 top-4 z-[55] grid size-16 place-items-center lg:right-6 lg:top-6 lg:size-20"
       >
         <span className="animate-lock-ring absolute inset-0 rounded-full border-2 border-white" />
         <span className="animate-lock-ring absolute inset-0 rounded-full border-2 border-kendari-sky [animation-delay:120ms]" />
-        <span className="animate-unlock-label absolute bottom-full right-0 mb-3 whitespace-nowrap rounded-full bg-kendari-deep/90 px-3 py-1 font-heading text-xs font-bold text-white ring-1 ring-white/25 backdrop-blur-md">
+        <span className="animate-unlock-label absolute right-0 top-full mt-3 whitespace-nowrap rounded-full bg-kendari-deep/90 px-3 py-1 font-heading text-xs font-bold text-white ring-1 ring-white/25 backdrop-blur-md">
           Layar terkunci
         </span>
       </div>
