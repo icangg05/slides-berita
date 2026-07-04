@@ -113,14 +113,21 @@ export function DetailView({
     loadPostClient();
   }, [postId, post]);
 
-  // Loading veil: fade out immediately once data is ready — no artificial hold.
-  // (Still waits for the client-side fetch if the server render had no post.)
-  // Only a short crossfade remains so the article doesn't pop in abruptly.
+  // Loading veil: hold for a beat once data is ready so the spinner is actually
+  // seen, then ease it away. (Still waits for the client-side fetch if the
+  // server render had no post.) A short crossfade keeps the article from
+  // popping in abruptly.
   useEffect(() => {
     if (clientLoading) return;
-    setVeilOut(true);
-    const t = setTimeout(() => setShowVeil(false), 700);
-    return () => clearTimeout(t);
+    let fade: ReturnType<typeof setTimeout>;
+    const hold = setTimeout(() => {
+      setVeilOut(true);
+      fade = setTimeout(() => setShowVeil(false), 700);
+    }, 500);
+    return () => {
+      clearTimeout(hold);
+      clearTimeout(fade);
+    };
   }, [clientLoading]);
 
   // Refs mirror state so the rAF loop / listeners read fresh values.
