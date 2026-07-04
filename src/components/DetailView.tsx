@@ -157,6 +157,12 @@ export function DetailView({
     let last = performance.now();
     let rampStart = 0; // when the current run of motion began (speed ramp).
     let wasScrolling = false;
+    let velocity = 0; // px/s carried from the last drag move (fling inertia)
+    let momentum = false; // true while gliding after a flick release
+    let lastMoveT = 0; // timestamp of the last pointermove (for velocity)
+    const MOMENTUM_FRICTION = 4.2; // exponential decay rate; higher = stops sooner
+    const MOMENTUM_MIN_V = 8; // px/s below which the glide ends
+    const MOMENTUM_START_V = 40; // need at least this much flick to glide at all
     const startT = setTimeout(() => {
       startedRef.current = true;
     }, START_DELAY_MS);
@@ -174,25 +180,48 @@ export function DetailView({
       last = now;
       const max = maxScroll();
       if (posRef.current > max) apply(max); // content re-measured shorter
-      const canScroll =
-        startedRef.current &&
-        !holdingRef.current &&
-        !interactingRef.current &&
-        !lightboxRef.current &&
-        posRef.current < max - 0.5;
 
-      if (canScroll) {
-        // Ease speed up from 0 with an ease-in curve each time motion restarts —
-        // a gentle acceleration instead of an instant lurch.
-        if (!wasScrolling) {
-          rampStart = now;
-          wasScrolling = true;
+      if (holdingRef.current) {
+        // Dragging — pointermove drives the position; cancel any glide.
+        momentum = false;
+        wasScrolling = false;
+      } else if (momentum) {
+        // Fling inertia: keep gliding with exponential friction so a flick
+        // flows on like a normal page. Runs even during the idle-resume window.
+        let p = posRef.current + velocity * dt;
+        velocity *= Math.exp(-MOMENTUM_FRICTION * dt);
+        if (p <= 0) {
+          p = 0;
+          velocity = 0;
+        } else if (p >= max) {
+          p = max;
+          velocity = 0;
         }
-        const t = Math.min((now - rampStart) / SCROLL_RAMP_MS, 1);
-        const speed = AUTO_SCROLL_PXPS * t * t; // t² = accelerate from rest
-        apply(Math.min(max, posRef.current + speed * dt));
+        if (Math.abs(velocity) < MOMENTUM_MIN_V) {
+          velocity = 0;
+          momentum = false;
+        }
+        apply(p);
+        wasScrolling = false;
       } else {
-        wasScrolling = false; // paused → next resume ramps up again
+        // Calm auto-scroll crawl when idle and not paused.
+        const canScroll =
+          startedRef.current &&
+          !interactingRef.current &&
+          !lightboxRef.current &&
+          posRef.current < max - 0.5;
+        if (canScroll) {
+          // Ease speed up from 0 each time motion restarts — gentle, not a lurch.
+          if (!wasScrolling) {
+            rampStart = now;
+            wasScrolling = true;
+          }
+          const t = Math.min((now - rampStart) / SCROLL_RAMP_MS, 1);
+          const speed = AUTO_SCROLL_PXPS * t * t; // t² = accelerate from rest
+          apply(Math.min(max, posRef.current + speed * dt));
+        } else {
+          wasScrolling = false; // paused → next resume ramps up again
+        }
       }
 
       const end = max <= 2 || posRef.current >= max - 2;
@@ -208,24 +237,44 @@ export function DetailView({
 
     const onPointerDown = (e: PointerEvent) => {
       holdingRef.current = true;
+      momentum = false; // grabbing kills any ongoing glide
+      velocity = 0;
       setInteracting(true);
       interactingRef.current = true;
       if (idleTimer.current) clearTimeout(idleTimer.current);
       dragStartY = e.clientY;
       dragStartPos = posRef.current;
+      lastMoveT = performance.now();
     };
     const onPointerMove = (e: PointerEvent) => {
       if (!holdingRef.current) return;
-      apply(
-        Math.max(0, Math.min(maxScroll(), dragStartPos - (e.clientY - dragStartY))),
+      const now = performance.now();
+      const newPos = Math.max(
+        0,
+        Math.min(maxScroll(), dragStartPos - (e.clientY - dragStartY)),
       );
+      const dtM = (now - lastMoveT) / 1000;
+      if (dtM > 0.001) {
+        // Track release velocity with light smoothing (so one noisy sample
+        // doesn't dominate) and a clamp (so a hard flick can't rocket off).
+        const instant = (newPos - posRef.current) / dtM;
+        velocity = Math.max(
+          -9000,
+          Math.min(9000, 0.7 * instant + 0.3 * velocity),
+        );
+      }
+      lastMoveT = now;
+      apply(newPos);
     };
     const onPointerUp = () => {
       if (!holdingRef.current) return;
       holdingRef.current = false;
-      markInteract(); // settle, then ease back into motion
+      // A quick flick glides on; a slow/settled drag just stops.
+      momentum = Math.abs(velocity) > MOMENTUM_START_V;
+      markInteract(); // settle, then ease back into the auto crawl
     };
     const onWheel = (e: WheelEvent) => {
+      momentum = false;
       apply(Math.max(0, Math.min(maxScroll(), posRef.current + e.deltaY)));
       markInteract();
     };
