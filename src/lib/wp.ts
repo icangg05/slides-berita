@@ -1,12 +1,13 @@
 import type { NewsItem } from "./types";
 
 /**
- * WordPress REST data layer for the Kendari news kiosk.
+ * WordPress REST *source* layer for the Kendari news kiosk.
  *
- * The public source is the Diskominfo Kota Kendari newsroom. All fetches use
- * Next.js ISR (`revalidate`) so the running kiosk transparently picks up fresh
- * headlines every few minutes without a redeploy — satisfying the PRD's
- * "fetch berkala setiap 5-10 menit" requirement.
+ * The public source is the Diskominfo Kota Kendari newsroom. This module is now
+ * ONLY the upstream fetcher: it is called during a sync (see `src/lib/db.ts`)
+ * to pull fresh articles from WordPress. The kiosk itself never reads from here
+ * directly — it reads the copy cached in the Neon database, so page loads stay
+ * fast and don't repeatedly hit the upstream API.
  */
 
 const WP_API_BASE =
@@ -15,9 +16,6 @@ const WP_API_BASE =
 
 /** How many headlines the slideshow rotates through (PRD F-01: 20). */
 export const NEWS_COUNT = 20;
-
-/** Revalidation window in seconds (PRD: refresh every 5–10 minutes). */
-export const REVALIDATE_SECONDS = 300;
 
 // --- Raw REST payload (only the fields we touch) --------------------------
 
@@ -153,7 +151,7 @@ function normalize(post: WpPost): NewsItem {
     excerpt: toPlainText(post.excerpt.rendered),
     contentHtml: sanitizeContent(post.content.rendered),
     date: post.date,
-    dateLabel: safeDateLabel(post.date),
+    dateLabel: formatDateLabel(post.date),
     category: pickCategory(post._embedded?.["wp:term"]),
     imageUrl: image,
     // Full-size original (uncropped) so the lightbox can show the whole frame.
@@ -166,48 +164,37 @@ function normalize(post: WpPost): NewsItem {
   };
 }
 
-function safeDateLabel(iso: string): string {
+/**
+ * Human date label in id-ID / WITA. Exported so the database layer can recompute
+ * it when serving stored rows (the raw ISO date is what we persist).
+ */
+export function formatDateLabel(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
   return `${dateFormatter.format(d)} WITA`;
 }
 
-// --- Public API ------------------------------------------------------------
+// --- Public API (upstream source only) -------------------------------------
 
-/** Fetch the latest headlines for the slideshow (PRD F-01). */
-export async function fetchPosts(count = NEWS_COUNT): Promise<NewsItem[]> {
+/**
+ * Pull the latest headlines straight from the WordPress newsroom.
+ *
+ * Used exclusively by the sync job. `cache: "no-store"` guarantees a real
+ * upstream hit (an admin pressing "Fetch ulang" must get genuinely fresh data,
+ * not a Next.js data-cache replay). The list endpoint already embeds full
+ * `content.rendered`, so a single list fetch gives us everything the detail
+ * pages need too.
+ */
+export async function fetchPostsFromSource(count = NEWS_COUNT): Promise<NewsItem[]> {
   // orderby=date&order=desc → newest article first, down to the oldest.
   const url = `${WP_API_BASE}/posts?per_page=${count}&_embed&orderby=date&order=desc`;
-  try {
-    const res = await fetch(url, {
-      next: { revalidate: REVALIDATE_SECONDS },
-      headers: { Accept: "application/json" },
-    });
-    if (!res.ok) {
-      console.error(`[wp] posts fetch failed: ${res.status} ${res.statusText}`);
-      return [];
-    }
-    const data = (await res.json()) as WpPost[];
-    return data.map(normalize);
-  } catch (err) {
-    console.error("[wp] posts fetch error:", err);
-    return [];
+  const res = await fetch(url, {
+    cache: "no-store",
+    headers: { Accept: "application/json" },
+  });
+  if (!res.ok) {
+    throw new Error(`posts fetch failed: ${res.status} ${res.statusText}`);
   }
-}
-
-/** Fetch a single article for the detail page (PRD F-02). */
-export async function fetchPost(id: number): Promise<NewsItem | null> {
-  const url = `${WP_API_BASE}/posts/${id}?_embed`;
-  try {
-    const res = await fetch(url, {
-      next: { revalidate: REVALIDATE_SECONDS },
-      headers: { Accept: "application/json" },
-    });
-    if (!res.ok) return null;
-    const data = (await res.json()) as WpPost;
-    return normalize(data);
-  } catch (err) {
-    console.error(`[wp] post ${id} fetch error:`, err);
-    return null;
-  }
+  const data = (await res.json()) as WpPost[];
+  return data.map(normalize);
 }

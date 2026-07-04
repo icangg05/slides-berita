@@ -1,22 +1,22 @@
 import { NextResponse } from "next/server";
-import { fetchPosts } from "@/lib/wp";
+import { getPostsForDisplay } from "@/lib/db";
 
 /**
- * Same-origin proxy the running kiosk polls in the background so it can refresh
- * headlines without a full page reload (and without exposing the client to
- * CORS on the upstream WordPress host). Cached via ISR at the fetch layer.
+ * Same-origin JSON feed the running kiosk polls in the background to refresh
+ * its headlines without a full page reload. Reads from the Neon database (not
+ * the upstream WordPress API), so it's fast and cheap to hit frequently.
  */
-// Literal required by Next's static analysis; mirrors REVALIDATE_SECONDS.
-export const revalidate = 300;
+export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const posts = await fetchPosts();
-  return NextResponse.json(
-    { posts, fetchedAt: new Date().toISOString() },
-    {
-      headers: {
-        "Cache-Control": "public, s-maxage=300, stale-while-revalidate=60",
-      },
-    },
-  );
+  try {
+    const posts = await getPostsForDisplay();
+    return NextResponse.json({ posts, fetchedAt: new Date().toISOString() });
+  } catch (err) {
+    console.error("[api/posts] read failed:", err);
+    return NextResponse.json(
+      { posts: [], fetchedAt: new Date().toISOString(), error: "read_failed" },
+      { status: 500 },
+    );
+  }
 }

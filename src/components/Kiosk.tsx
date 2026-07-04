@@ -13,7 +13,14 @@ import { Badge } from "./ui/badge";
 import { Card } from "./ui/card";
 import { Button } from "./ui/button";
 import { LoadingScreen } from "./LoadingScreen";
-import { fetchPosts } from "@/lib/wp";
+
+/** Fetch the current headline list from our own DB-backed API. */
+async function fetchPostsFromApi(): Promise<NewsItem[]> {
+  const res = await fetch("/api/posts", { cache: "no-store" });
+  if (!res.ok) return [];
+  const data = (await res.json()) as { posts?: NewsItem[] };
+  return data.posts ?? [];
+}
 
 const SLIDE_MS = 11000; // ~11s: comfortable read time for title + excerpt, with headroom for mid-slide arrivals.
 const POLL_MS = 5 * 60 * 1000; // PRD §6: refresh headlines every ~5 min.
@@ -62,7 +69,6 @@ export function Kiosk({ initialPosts }: { initialPosts: NewsItem[] }) {
   const resumeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lockHideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const idleLockTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const useClientFetchRef = useRef(false);
 
   const current = posts[index] ?? posts[0] ?? null;
 
@@ -111,12 +117,11 @@ export function Kiosk({ initialPosts }: { initialPosts: NewsItem[] }) {
 
     async function loadInitialPostsClient() {
       try {
-        const fetched = await fetchPosts();
-        if (fetched && fetched.length > 0) {
-          useClientFetchRef.current = true;
+        const fetched = await fetchPostsFromApi();
+        if (fetched.length > 0) {
           setPosts(fetched);
         } else {
-          // Fetch succeeded but the newsroom returned nothing — genuine empty.
+          // API reached but the database returned nothing — genuine empty.
           setConnectFailed(true);
         }
       } catch (err) {
@@ -128,35 +133,21 @@ export function Kiosk({ initialPosts }: { initialPosts: NewsItem[] }) {
   }, [posts.length]);
 
   // --- Background refresh (live newsroom) ---------------------------------
+  // Polls our own DB-backed feed, so it stays fast and never touches the
+  // upstream API. Fresh articles appear here once an admin runs a sync.
   useEffect(() => {
     const id = setInterval(async () => {
       try {
-        let fetched: NewsItem[] = [];
-        if (posts.length === 0 || useClientFetchRef.current) {
-          fetched = await fetchPosts();
-        } else {
-          const res = await fetch("/api/posts", { cache: "no-store" });
-          if (res.ok) {
-            const data = (await res.json()) as { posts?: NewsItem[] };
-            fetched = data.posts ?? [];
-          } else {
-            // If server-side api fails, switch to direct client fetch
-            useClientFetchRef.current = true;
-            fetched = await fetchPosts();
-          }
-        }
-
-        if (fetched && fetched.length > 0) {
-          setPosts((prev) =>
-            sameOrder(prev, fetched) ? prev : fetched,
-          );
+        const fetched = await fetchPostsFromApi();
+        if (fetched.length > 0) {
+          setPosts((prev) => (sameOrder(prev, fetched) ? prev : fetched));
         }
       } catch {
         /* transient network blip on the kiosk — keep showing cached slides */
       }
     }, POLL_MS);
     return () => clearInterval(id);
-  }, [posts.length]);
+  }, []);
 
   useEffect(() => {
     if (index >= posts.length && posts.length > 0) setIndex(0);
@@ -170,14 +161,13 @@ export function Kiosk({ initialPosts }: { initialPosts: NewsItem[] }) {
     [],
   );
 
-  // Mount veil timing: hold ~700ms (not a flash), then fade out over ~500ms.
+  // Mount veil: fade out immediately on arrival — no artificial hold. The home
+  // data is already server-rendered from the DB, so there's nothing to wait for;
+  // we only keep a short crossfade so content doesn't pop in abruptly.
   useEffect(() => {
-    const t1 = setTimeout(() => setBootOut(true), 700);
-    const t2 = setTimeout(() => setBootVeil(false), 700 + 500);
-    return () => {
-      clearTimeout(t1);
-      clearTimeout(t2);
-    };
+    setBootOut(true);
+    const t = setTimeout(() => setBootVeil(false), 500);
+    return () => clearTimeout(t);
   }, []);
 
   // Connecting veil transition: once posts are loaded, fade out smoothly.

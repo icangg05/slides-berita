@@ -1,9 +1,9 @@
-import { fetchPost, fetchPosts } from "@/lib/wp";
+import { getPost, getPostsForDisplay } from "@/lib/db";
 import { DetailView } from "@/components/DetailView";
 import { BeritaMissing } from "@/components/BeritaMissing";
 
-// Literal required by Next's static analysis; mirrors REVALIDATE_SECONDS.
-export const revalidate = 300;
+// Read the article straight from Neon on every request.
+export const dynamic = "force-dynamic";
 
 export default async function BeritaDetailPage({
   params,
@@ -21,8 +21,8 @@ export default async function BeritaDetailPage({
   // lets us compute the "next berita" for the end-of-article auto-advance.
   // Catch errors so server rendering doesn't crash, allowing the client to fetch.
   const [post, list] = await Promise.all([
-    fetchPost(postId).catch(() => null),
-    fetchPosts().catch(() => []),
+    getPost(postId).catch(() => null),
+    getPostsForDisplay().catch(() => []),
   ]);
 
   const idx = list ? list.findIndex((p) => p.id === postId) : -1;

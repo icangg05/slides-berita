@@ -2,8 +2,18 @@
 
 Aplikasi web **Next.js** untuk perangkat *Digital Signage Kiosk* (Microvision)
 berorientasi **portrait (1080×1920)**. Menampilkan slideshow otomatis 20 berita
-terbaru Kota Kendari dari WordPress REST API, lengkap dengan mode interaktif,
-mode kunci layar, dan atribusi resmi Dinas Kominfo Kota Kendari.
+terbaru Kota Kendari, lengkap dengan mode interaktif, mode kunci layar, dan
+atribusi resmi Dinas Kominfo Kota Kendari.
+
+**Alur data:** berita ditarik dari WordPress REST API lalu **disimpan ke
+database Neon (Postgres)**; kiosk membaca dari database tersebut — bukan langsung
+dari API — sehingga load cepat dan tidak terus-menerus menembak API sumber.
+Penarikan ulang dilakukan lewat halaman admin [`/admin`](src/app/admin/page.tsx).
+
+```
+WordPress REST  ──(sync)──▶  Neon Postgres  ──(read)──▶  Kiosk UI
+   sumber          /admin        database          home + detail
+```
 
 > Dikembangkan dan Dikelola oleh **Dinas Kominfo Kota Kendari** sebagai
 > Fasilitator Integrasi Data & Pusat Informasi Publik Digital Kota Kendari.
@@ -17,7 +27,8 @@ mode kunci layar, dan atribusi resmi Dinas Kominfo Kota Kendari.
 | Framework   | Next.js (App Router) + React 19                               |
 | Styling     | Tailwind CSS v4 (glassmorphism, animasi)                      |
 | Fonts       | **Sen** (heading) + **DM Sans** (body) via `next/font`        |
-| Data source | WordPress REST API `berita.kendarikota.go.id`                 |
+| Data source | WordPress REST API `berita.kendarikota.go.id` (via sync)      |
+| Database    | Neon (Postgres) — sumber baca kiosk, driver `@neondatabase/serverless` |
 | Container   | Docker — dev (hot reload) & prod (multi-stage standalone)     |
 
 ---
@@ -70,7 +81,7 @@ docker compose up --build -d
 | F-03   | Kunci layar (floating button)  | [`LockButton.tsx`](src/components/LockButton.tsx) — **tahan 3 detik** untuk kunci/buka |
 | F-04   | Atribusi kelembagaan           | [`Header.tsx`](src/components/Header.tsx) + [`Footer.tsx`](src/components/Footer.tsx) |
 | §5     | Glassmorphism + palet Kendari  | [`globals.css`](src/app/globals.css) (design tokens `@theme`)       |
-| §6     | Refresh berkala 5–10 mnt       | ISR `revalidate` + polling klien via [`/api/posts`](src/app/api/posts/route.ts) |
+| §6     | Refresh berkala 5–10 mnt       | Polling klien via [`/api/posts`](src/app/api/posts/route.ts) (baca DB) + sinkron manual di [`/admin`](src/app/admin/page.tsx) |
 
 ### Cara pakai mode Kunci (F-03)
 
@@ -104,14 +115,26 @@ karena aset resmi situs terproteksi hotlink. Untuk memakai logo asli:
 
 ## Konfigurasi
 
-| Env var       | Default                                              | Fungsi                        |
-| ------------- | ---------------------------------------------------- | ----------------------------- |
-| `WP_API_BASE` | `https://berita.kendarikota.go.id/wp-json/wp/v2`     | Endpoint WordPress REST       |
-| `PORT`        | `3000`                                               | Port server (prod standalone) |
+| Env var        | Default                                              | Fungsi                                        |
+| -------------- | ---------------------------------------------------- | --------------------------------------------- |
+| `DATABASE_URL` | —                                                    | Connection string Neon (Postgres) — **wajib** |
+| `WP_API_BASE`  | `https://berita.kendarikota.go.id/wp-json/wp/v2`     | Endpoint WordPress REST (sumber sinkron)       |
+| `ADMIN_TOKEN`  | *(kosong)*                                           | Token untuk `/admin` → `POST /api/admin/sync`. Jika kosong, endpoint terbuka (dev). |
+| `PORT`         | `3000`                                               | Port server (prod standalone)                  |
 
-Konstanta perilaku ada di [`src/lib/wp.ts`](src/lib/wp.ts) (`NEWS_COUNT`,
-`REVALIDATE_SECONDS`) dan [`Kiosk.tsx`](src/components/Kiosk.tsx) (`SLIDE_MS`,
-`POLL_MS`).
+Konstanta perilaku ada di [`src/lib/wp.ts`](src/lib/wp.ts) (`NEWS_COUNT`) dan
+[`Kiosk.tsx`](src/components/Kiosk.tsx) (`SLIDE_MS`, `POLL_MS`).
+
+### Halaman admin — tarik ulang berita
+
+Buka [`/admin`](src/app/admin/page.tsx). Halaman ini menampilkan jumlah berita
+tersimpan + waktu sinkron terakhir, dan tombol **"Fetch Ulang Sekarang"** yang
+menarik artikel terbaru dari WordPress lalu meng-*upsert* ke Neon. Bila
+`ADMIN_TOKEN` diset, masukkan token tersebut sebelum menekan tombol.
+
+Tabel database (`posts`, `sync_state`) dibuat otomatis saat pertama kali diakses
+— tidak perlu migrasi manual. Saat database masih kosong, kunjungan pertama ke
+kiosk akan otomatis melakukan satu kali *seed* dari sumber.
 
 ---
 

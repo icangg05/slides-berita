@@ -10,8 +10,23 @@ import { Footer } from "./Footer";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { LoadingScreen } from "./LoadingScreen";
-import { fetchPost, fetchPosts } from "@/lib/wp";
 import { BeritaMissing } from "./BeritaMissing";
+
+/** Fetch a single stored article from our own DB-backed API. */
+async function fetchPostFromApi(id: number): Promise<NewsItem | null> {
+  const res = await fetch(`/api/posts/${id}`, { cache: "no-store" });
+  if (!res.ok) return null;
+  const data = (await res.json()) as { post?: NewsItem | null };
+  return data.post ?? null;
+}
+
+/** Fetch the current headline list from our own DB-backed API. */
+async function fetchPostsFromApi(): Promise<NewsItem[]> {
+  const res = await fetch("/api/posts", { cache: "no-store" });
+  if (!res.ok) return [];
+  const data = (await res.json()) as { posts?: NewsItem[] };
+  return data.posts ?? [];
+}
 
 const RESUME_IDLE_MS = 1500; // resume auto-scroll this long after last touch.
 const AUTO_SCROLL_PXPS = 40; // auto-scroll speed (px / second).
@@ -68,8 +83,8 @@ export function DetailView({
       try {
         setClientLoading(true);
         const [fetchedPost, fetchedList] = await Promise.all([
-          fetchPost(postId),
-          fetchPosts(),
+          fetchPostFromApi(postId),
+          fetchPostsFromApi(),
         ]);
         if (!fetchedPost) {
           setClientError(true);
@@ -98,16 +113,14 @@ export function DetailView({
     loadPostClient();
   }, [postId, post]);
 
-  // Loading veil timing: hold ~450ms, then fade out over ~700ms.
-  // Wait until clientLoading is done if it is fetching client-side.
+  // Loading veil: fade out immediately once data is ready — no artificial hold.
+  // (Still waits for the client-side fetch if the server render had no post.)
+  // Only a short crossfade remains so the article doesn't pop in abruptly.
   useEffect(() => {
     if (clientLoading) return;
-    const t1 = setTimeout(() => setVeilOut(true), 450);
-    const t2 = setTimeout(() => setShowVeil(false), 450 + 700);
-    return () => {
-      clearTimeout(t1);
-      clearTimeout(t2);
-    };
+    setVeilOut(true);
+    const t = setTimeout(() => setShowVeil(false), 700);
+    return () => clearTimeout(t);
   }, [clientLoading]);
 
   // Refs mirror state so the rAF loop / listeners read fresh values.
