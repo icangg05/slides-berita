@@ -161,21 +161,35 @@ export function Kiosk({ initialPosts }: { initialPosts: NewsItem[] }) {
     [],
   );
 
-  // Mount veil: fade out immediately on arrival — no artificial hold. The home
-  // data is already server-rendered from the DB, so there's nothing to wait for;
-  // we only keep a short crossfade so content doesn't pop in abruptly.
+  // Mount veil: hold for a beat on arrival so the spinner is actually seen,
+  // then ease it away. The home data is already server-rendered from the DB, so
+  // the hold is purely so the loading screen doesn't just flash; a short
+  // crossfade after keeps content from popping in abruptly.
   useEffect(() => {
-    setBootOut(true);
-    const t = setTimeout(() => setBootVeil(false), 500);
-    return () => clearTimeout(t);
+    let fade: ReturnType<typeof setTimeout>;
+    const hold = setTimeout(() => {
+      setBootOut(true);
+      fade = setTimeout(() => setBootVeil(false), 500);
+    }, 500);
+    return () => {
+      clearTimeout(hold);
+      clearTimeout(fade);
+    };
   }, []);
 
-  // Connecting veil transition: once posts are loaded, fade out smoothly.
+  // Connecting veil transition: once posts are loaded, hold for a beat so the
+  // spinner is actually seen, then fade out smoothly.
   useEffect(() => {
     if (posts.length > 0 && connectingVeil) {
-      setConnectingOut(true);
-      const t = setTimeout(() => setConnectingVeil(false), 500);
-      return () => clearTimeout(t);
+      let fade: ReturnType<typeof setTimeout>;
+      const hold = setTimeout(() => {
+        setConnectingOut(true);
+        fade = setTimeout(() => setConnectingVeil(false), 500);
+      }, 500);
+      return () => {
+        clearTimeout(hold);
+        clearTimeout(fade);
+      };
     }
   }, [posts.length, connectingVeil]);
 
