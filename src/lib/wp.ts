@@ -156,6 +156,8 @@ function normalize(post: WpPost): NewsItem {
     dateLabel: safeDateLabel(post.date),
     category: pickCategory(post._embedded?.["wp:term"]),
     imageUrl: image,
+    // Full-size original (uncropped) so the lightbox can show the whole frame.
+    imageFullUrl: media?.source_url ?? image,
     imageAlt: media?.alt_text
       ? toPlainText(media.alt_text)
       : toPlainText(post.title.rendered),

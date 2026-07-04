@@ -41,6 +41,7 @@ export function DetailView({
   const scrollRef = useRef<HTMLDivElement | null>(null); // the clipping viewport
   const contentRef = useRef<HTMLDivElement | null>(null); // the translated content
   const posRef = useRef(0); // current scroll offset in px (float, we own it)
+  const progressRef = useRef<HTMLDivElement | null>(null); // scroll-progress bar fill
 
   const [post, setPost] = useState<NewsItem | null>(initialPost);
   const [nextId, setNextId] = useState<number | null>(initialNextId);
@@ -224,6 +225,14 @@ export function DetailView({
         }
       }
 
+      // Scroll-progress indicator: fill fraction = how far down we are.
+      // Driven straight into the DOM (scaleX) so it stays perfectly in sync
+      // with the crawl without a React re-render every frame.
+      if (progressRef.current) {
+        const frac = max <= 0 ? 1 : Math.min(1, Math.max(0, posRef.current / max));
+        progressRef.current.style.transform = `scaleX(${frac})`;
+      }
+
       const end = max <= 2 || posRef.current >= max - 2;
       setAtEnd((prev) => (prev === end ? prev : end));
       raf = requestAnimationFrame(loop);
@@ -405,6 +414,26 @@ export function DetailView({
         </div>
       </header>
 
+      {/* ---- Scroll-progress indicator ----
+           Fills left→right as the article scrolls; full when the reader has
+           reached the bottom. The fill width is driven imperatively from the
+           auto-scroll loop (see progressRef) so it tracks the crawl exactly. */}
+      <div
+        className="z-20 h-0.5 w-full shrink-0 bg-kendari-deep/10 lg:h-1"
+        role="progressbar"
+        aria-label="Posisi baca artikel"
+      >
+        <div
+          ref={progressRef}
+          className="h-full origin-left"
+          style={{
+            transform: "scaleX(0)",
+            backgroundColor: "#3C82F6", // same accent blue as the slides bar
+            boxShadow: "0 0 8px #3C82F6",
+          }}
+        />
+      </div>
+
       {/* ---- Scrollable article ----
            The scroll box is absolutely sized inside this wrapper so the
            end-of-article overlay never changes its height (which would make
@@ -420,9 +449,12 @@ export function DetailView({
         <button
           type="button"
           onClick={() => {
-            if (post.imageUrl) {
+            // Enlarge the full-size original (uncropped), falling back to the
+            // resized hero image if no original is available.
+            const full = post.imageFullUrl ?? post.imageUrl;
+            if (full) {
               setLightboxClosing(false);
-              setLightboxSrc(post.imageUrl);
+              setLightboxSrc(full);
             }
           }}
           aria-label="Perbesar gambar sampul"

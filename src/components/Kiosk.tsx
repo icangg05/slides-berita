@@ -52,6 +52,12 @@ export function Kiosk({ initialPosts }: { initialPosts: NewsItem[] }) {
   const [bootOut, setBootOut] = useState(false);
   const [connectingVeil, setConnectingVeil] = useState(initialPosts.length === 0);
   const [connectingOut, setConnectingOut] = useState(false);
+  // While the connecting veil is up we show the same "Memuat berita…" spinner
+  // as local (LoadingScreen). Only once the client fallback fetch has actually
+  // failed to return anything do we swap to the "menghubungkan" empty message —
+  // so production (server fetch blocked → empty initialPosts) no longer flashes
+  // a different screen than local on every return to home.
+  const [connectFailed, setConnectFailed] = useState(false);
 
   const resumeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lockHideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -109,9 +115,13 @@ export function Kiosk({ initialPosts }: { initialPosts: NewsItem[] }) {
         if (fetched && fetched.length > 0) {
           useClientFetchRef.current = true;
           setPosts(fetched);
+        } else {
+          // Fetch succeeded but the newsroom returned nothing — genuine empty.
+          setConnectFailed(true);
         }
       } catch (err) {
         console.error("Client initial fetch error:", err);
+        setConnectFailed(true);
       }
     }
     loadInitialPostsClient();
@@ -435,7 +445,10 @@ export function Kiosk({ initialPosts }: { initialPosts: NewsItem[] }) {
           }`}
           aria-hidden
         >
-          <EmptyState />
+          {/* Loading vs. genuine-empty: match local's "Memuat berita…" spinner
+              while the client fetch is still in flight; only show the
+              "menghubungkan" message once that fetch has actually failed. */}
+          {connectFailed ? <EmptyState /> : <LoadingScreen />}
         </div>
       )}
     </main>

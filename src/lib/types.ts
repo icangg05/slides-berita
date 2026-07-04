@@ -8,7 +8,8 @@ export interface NewsItem {
   date: string; // ISO date string
   dateLabel: string; // human label in id-ID / WITA
   category: string;
-  imageUrl: string | null; // best-fit featured image
+  imageUrl: string | null; // best-fit featured image (may be a cropped size)
+  imageFullUrl: string | null; // full-size original — used when enlarged
   imageAlt: string;
   author: string;
   link: string; // canonical source URL
