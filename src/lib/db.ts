@@ -50,13 +50,16 @@ function ensureSchema(): Promise<void> {
       await sql`CREATE INDEX IF NOT EXISTS posts_date_desc_idx ON posts (date DESC)`;
       await sql`
         CREATE TABLE IF NOT EXISTS sync_state (
-          id             INT PRIMARY KEY DEFAULT 1,
-          last_synced_at TIMESTAMPTZ,
-          post_count     INT  NOT NULL DEFAULT 0,
-          last_status    TEXT,
+          id              INT PRIMARY KEY DEFAULT 1,
+          last_synced_at  TIMESTAMPTZ,
+          last_success_at TIMESTAMPTZ,
+          post_count      INT  NOT NULL DEFAULT 0,
+          last_status     TEXT,
           CONSTRAINT sync_state_singleton CHECK (id = 1)
         )
       `;
+      // Migrate older deployments that predate the last_success_at column.
+      await sql`ALTER TABLE sync_state ADD COLUMN IF NOT EXISTS last_success_at TIMESTAMPTZ`;
     })().catch((err) => {
       // Reset so a transient failure (e.g. DB asleep) can be retried next call.
       schemaReady = null;
@@ -152,10 +155,17 @@ export interface SyncResult {
   error?: string;
 }
 
-/** Upsert a batch of articles keyed by WordPress id. */
+/**
+ * Upsert a batch of articles keyed by WordPress id — all-or-nothing.
+ *
+ * The whole batch runs in a single transaction so a mid-batch failure (e.g. the
+ * DB connection dropping after row 10) can never leave Neon with a partially
+ * updated set. Either every article lands or none do.
+ */
 async function upsertPosts(items: NewsItem[]): Promise<void> {
-  for (const it of items) {
-    await sql`
+  if (items.length === 0) return;
+  const queries = items.map(
+    (it) => sql`
       INSERT INTO posts (
         id, title, excerpt, content_html, date, category,
         image_url, image_full_url, image_alt, author, link, synced_at
@@ -175,18 +185,32 @@ async function upsertPosts(items: NewsItem[]): Promise<void> {
         author         = EXCLUDED.author,
         link           = EXCLUDED.link,
         synced_at      = now()
-    `;
-  }
+    `,
+  );
+  await sql.transaction(queries);
 }
 
-async function recordSync(count: number, status: string): Promise<void> {
+/**
+ * Record the outcome of a sync attempt. `last_synced_at` tracks the last attempt
+ * (success or not) so the admin can see recency; `last_success_at` only advances
+ * on a genuine success, so a later failed attempt (e.g. a transient 403 from the
+ * source) never erases the fact that fresh data did land earlier.
+ */
+async function recordSync(
+  count: number,
+  status: string,
+  ok: boolean,
+): Promise<void> {
   await sql`
-    INSERT INTO sync_state (id, last_synced_at, post_count, last_status)
-    VALUES (1, now(), ${count}, ${status})
+    INSERT INTO sync_state (id, last_synced_at, last_success_at, post_count, last_status)
+    VALUES (
+      1, now(), CASE WHEN ${ok} THEN now() ELSE NULL END, ${count}, ${status}
+    )
     ON CONFLICT (id) DO UPDATE SET
-      last_synced_at = now(),
-      post_count     = ${count},
-      last_status    = ${status}
+      last_synced_at  = now(),
+      last_success_at = CASE WHEN ${ok} THEN now() ELSE sync_state.last_success_at END,
+      post_count      = ${count},
+      last_status     = ${status}
   `;
 }
 
@@ -202,7 +226,7 @@ export async function syncPosts(count = NEWS_COUNT): Promise<SyncResult> {
     const items = await fetchPostsFromSource(count);
     if (items.length === 0) {
       // Don't clobber good data with an empty upstream response.
-      await recordSync(await countPosts(), "empty");
+      await recordSync(await countPosts(), "empty", false);
       return {
         ok: false,
         count: 0,
@@ -212,13 +236,13 @@ export async function syncPosts(count = NEWS_COUNT): Promise<SyncResult> {
     }
     await upsertPosts(items);
     const total = await countPosts();
-    await recordSync(total, "ok");
+    await recordSync(total, "ok", true);
     return { ok: true, count: items.length, syncedAt: new Date().toISOString() };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error("[db] sync failed:", message);
     try {
-      await recordSync(await countPosts(), `error: ${message}`);
+      await recordSync(await countPosts(), `error: ${message}`, false);
     } catch {
       /* recording the failure is best-effort */
     }
@@ -234,7 +258,10 @@ export async function syncPosts(count = NEWS_COUNT): Promise<SyncResult> {
 // --- Sync status (for the admin page) --------------------------------------
 
 export interface SyncState {
+  /** When the last sync *attempt* ran (success or failure). */
   lastSyncedAt: string | null;
+  /** When data last *successfully* landed — unaffected by later failures. */
+  lastSuccessAt: string | null;
   lastStatus: string | null;
   totalPosts: number;
 }
@@ -242,12 +269,19 @@ export interface SyncState {
 export async function getSyncState(): Promise<SyncState> {
   await ensureSchema();
   const rows = (await sql`
-    SELECT last_synced_at, last_status FROM sync_state WHERE id = 1
-  `) as { last_synced_at: string | null; last_status: string | null }[];
+    SELECT last_synced_at, last_success_at, last_status FROM sync_state WHERE id = 1
+  `) as {
+    last_synced_at: string | null;
+    last_success_at: string | null;
+    last_status: string | null;
+  }[];
   const total = await countPosts();
   return {
     lastSyncedAt: rows[0]?.last_synced_at
       ? new Date(rows[0].last_synced_at).toISOString()
+      : null,
+    lastSuccessAt: rows[0]?.last_success_at
+      ? new Date(rows[0].last_success_at).toISOString()
       : null,
     lastStatus: rows[0]?.last_status ?? null,
     totalPosts: total,

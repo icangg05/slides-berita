@@ -6,10 +6,18 @@ import { Logo } from "@/components/Logo";
 
 interface SyncState {
   lastSyncedAt: string | null;
+  lastSuccessAt: string | null;
   lastStatus: string | null;
   totalPosts: number;
   tokenRequired?: boolean;
   autoFetchHours?: number;
+}
+
+/** Turn a raw `last_status` value into a short, human-readable reason. */
+function describeStatus(status: string | null): string {
+  if (!status || status === "ok") return "";
+  if (status === "empty") return "Sumber tidak mengembalikan artikel.";
+  return status.replace(/^error:\s*/, "");
 }
 
 interface SyncResponse {
@@ -148,29 +156,46 @@ export default function AdminPage() {
                 state?.lastStatus === "ok"
                   ? "text-emerald-300"
                   : state?.lastStatus
-                    ? "text-amber-300"
+                    ? "text-red-300"
                     : ""
               }`}
             >
               {state?.lastStatus === "ok"
-                ? "OK"
+                ? "Berhasil"
                 : state?.lastStatus
-                  ? "Perlu cek"
+                  ? "Gagal"
                   : "—"}
             </div>
             <div className="mt-1 text-[0.65rem] uppercase tracking-wide text-blue-100/60">
-              Status
+              Fetch terakhir
             </div>
           </div>
         </section>
 
-        {/* Last sync line */}
+        {/* Last successful sync line */}
         <div className="flex items-center justify-between rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm">
-          <span className="text-blue-100/60">Sinkron terakhir</span>
+          <span className="text-blue-100/60">Terakhir diperbarui pada</span>
           <span className="font-medium text-blue-50">
-            {formatWhen(state?.lastSyncedAt ?? null)}
+            {formatWhen(state?.lastSuccessAt ?? null)}
           </span>
         </div>
+
+        {/* Failed-attempt notice — only when the most recent attempt failed.
+            The kiosk keeps showing the last good data (above); this just flags
+            that the newest fetch didn't go through. */}
+        {state?.lastStatus && state.lastStatus !== "ok" && (
+          <div className="rounded-xl border border-red-400/30 bg-red-500/10 px-4 py-2.5 text-xs">
+            <div className="font-semibold text-red-100">
+              Percobaan terakhir gagal
+            </div>
+            <div className="mt-0.5 text-red-100/80">
+              {describeStatus(state.lastStatus)}
+            </div>
+            <div className="mt-0.5 text-red-100/60">
+              {formatWhen(state.lastSyncedAt ?? null)}
+            </div>
+          </div>
+        )}
 
         {/* Action panel */}
         <section className="rounded-2xl border border-white/15 bg-white/5 p-4 backdrop-blur-md">
@@ -193,6 +218,12 @@ export default function AdminPage() {
                   type={showToken ? "text" : "password"}
                   value={token}
                   onChange={(e) => setToken(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !loading) {
+                      e.preventDefault();
+                      runSync();
+                    }
+                  }}
                   placeholder="Masukkan ADMIN_TOKEN"
                   className="w-full rounded-lg border border-white/20 bg-white/10 px-3 py-2.5 pr-11 text-sm text-white placeholder:text-blue-100/40 focus:border-kendari-sky focus:outline-none"
                 />

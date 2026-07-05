@@ -188,13 +188,35 @@ export function formatDateLabel(iso: string): string {
 export async function fetchPostsFromSource(count = NEWS_COUNT): Promise<NewsItem[]> {
   // orderby=date&order=desc → newest article first, down to the oldest.
   const url = `${WP_API_BASE}/posts?per_page=${count}&_embed&orderby=date&order=desc`;
-  const res = await fetch(url, {
-    cache: "no-store",
-    headers: { Accept: "application/json" },
-  });
-  if (!res.ok) {
-    throw new Error(`posts fetch failed: ${res.status} ${res.statusText}`);
+  // The upstream sits behind a WAF that occasionally answers a legitimate
+  // request with 403/429/5xx (rate limiting). Retry a couple of times with a
+  // short backoff before giving up, so a spurious block doesn't fail the sync.
+  // A browser-like User-Agent also placates WAFs that reject the default one.
+  const MAX_ATTEMPTS = 3;
+  let lastError = "";
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      const res = await fetch(url, {
+        cache: "no-store",
+        headers: {
+          Accept: "application/json",
+          "User-Agent":
+            "Mozilla/5.0 (compatible; KendariNewsKiosk/1.0; +https://berita.kendarikota.go.id)",
+        },
+      });
+      if (res.ok) {
+        const data = (await res.json()) as WpPost[];
+        return data.map(normalize);
+      }
+      lastError = `posts fetch failed: ${res.status} ${res.statusText}`;
+      // 4xx other than the WAF-ish 403/429 won't fix themselves — fail fast.
+      if (res.status !== 403 && res.status !== 429 && res.status < 500) break;
+    } catch (err) {
+      lastError = err instanceof Error ? err.message : String(err);
+    }
+    if (attempt < MAX_ATTEMPTS) {
+      await new Promise((r) => setTimeout(r, attempt * 800));
+    }
   }
-  const data = (await res.json()) as WpPost[];
-  return data.map(normalize);
+  throw new Error(lastError || "posts fetch failed");
 }
