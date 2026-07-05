@@ -14,6 +14,22 @@ const WP_API_BASE =
   (typeof window === "undefined" ? process.env.WP_API_BASE : null)?.replace(/\/$/, "") ??
   "https://berita.kendarikota.go.id/wp-json/wp/v2";
 
+/**
+ * Optional shared-secret header for the upstream fetch. When the source sits
+ * behind Cloudflare (or any WAF) that blocks Vercel's datacenter IPs, the site
+ * owner can add a WAF "Skip" rule that allows requests carrying this header, and
+ * we send it here. Configure both env vars to enable; unset ⇒ nothing is sent
+ * (no behaviour change).
+ *
+ *   WP_BYPASS_HEADER  e.g. "X-Kiosk-Key"
+ *   WP_BYPASS_TOKEN   the secret value the WAF rule matches on
+ */
+function bypassHeaders(): Record<string, string> {
+  const name = process.env.WP_BYPASS_HEADER?.trim();
+  const value = process.env.WP_BYPASS_TOKEN;
+  return name && value ? { [name]: value } : {};
+}
+
 /** How many headlines the slideshow rotates through (PRD F-01: 20). */
 export const NEWS_COUNT = 20;
 
@@ -202,6 +218,7 @@ export async function fetchPostsFromSource(count = NEWS_COUNT): Promise<NewsItem
           Accept: "application/json",
           "User-Agent":
             "Mozilla/5.0 (compatible; KendariNewsKiosk/1.0; +https://berita.kendarikota.go.id)",
+          ...bypassHeaders(),
         },
       });
       if (res.ok) {

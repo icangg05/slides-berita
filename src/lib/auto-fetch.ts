@@ -30,6 +30,14 @@ export function startAutoFetch(): void {
   if (globalRef.__kioskAutoFetchStarted) return;
   globalRef.__kioskAutoFetchStarted = true;
 
+  // On Vercel there is no persistent process, so `setInterval` won't fire
+  // reliably — scheduling is handled by Vercel Cron hitting /api/cron/sync
+  // (see vercel.json). This in-process loop is only for local/long-running dev.
+  if (process.env.VERCEL) {
+    console.log("[auto-fetch] on Vercel — scheduling handled by cron, skipping interval");
+    return;
+  }
+
   const hours = getFetchIntervalHours();
   if (hours <= 0) {
     console.log(
