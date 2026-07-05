@@ -10,7 +10,7 @@ interface SyncState {
   lastStatus: string | null;
   totalPosts: number;
   tokenRequired?: boolean;
-  autoFetchHours?: number;
+  autoFetchTimes?: number[];
 }
 
 /** Turn a raw `last_status` value into a short, human-readable reason. */
@@ -41,13 +41,9 @@ function formatWhen(iso: string | null): string {
   return `${dtFormatter.format(d)} WITA`;
 }
 
-function formatInterval(hours: number | undefined): string {
-  if (!hours || hours <= 0) return "Nonaktif";
-  if (hours % 24 === 0) {
-    const days = hours / 24;
-    return days === 1 ? "Tiap 1 hari" : `Tiap ${days} hari`;
-  }
-  return hours === 1 ? "Tiap 1 jam" : `Tiap ${hours} jam`;
+function formatSchedule(times: number[] | undefined): string {
+  if (!times || times.length === 0) return "Nonaktif";
+  return times.map((h) => `${String(h).padStart(2, "0")}:00`).join(" & ");
 }
 
 export default function AdminPage() {
@@ -143,10 +139,10 @@ export default function AdminPage() {
           <div className="rounded-xl border border-white/15 bg-white/5 p-3 text-center backdrop-blur-md">
             <Clock className="mx-auto mb-1 size-4 text-blue-100/60" />
             <div className="font-heading text-sm font-bold leading-tight">
-              {formatInterval(state?.autoFetchHours)}
+              {formatSchedule(state?.autoFetchTimes)}
             </div>
             <div className="mt-1 text-[0.65rem] uppercase tracking-wide text-blue-100/60">
-              Auto-fetch
+              Auto-fetch WITA
             </div>
           </div>
           <div className="rounded-xl border border-white/15 bg-white/5 p-3 text-center backdrop-blur-md">
@@ -201,7 +197,7 @@ export default function AdminPage() {
         <section className="rounded-2xl border border-white/15 bg-white/5 p-4 backdrop-blur-md">
           <p className="mb-3 text-xs leading-relaxed text-blue-100/70">
             Tarik artikel terbaru dari sumber WordPress ke database Neon. Data
-            juga tersegarkan otomatis di latar belakang sesuai interval di atas.
+            juga tersegarkan otomatis di latar belakang sesuai jadwal di atas.
           </p>
 
           {state?.tokenRequired && (

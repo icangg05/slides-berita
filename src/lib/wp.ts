@@ -1,34 +1,23 @@
 import type { NewsItem } from "./types";
 
 /**
- * WordPress REST *source* layer for the Kendari news kiosk.
+ * WordPress *source* layer for the Kendari news kiosk.
  *
- * The public source is the Diskominfo Kota Kendari newsroom. This module is now
- * ONLY the upstream fetcher: it is called during a sync (see `src/lib/db.ts`)
- * to pull fresh articles from WordPress. The kiosk itself never reads from here
- * directly — it reads the copy cached in the Neon database, so page loads stay
- * fast and don't repeatedly hit the upstream API.
+ * The upstream is the Diskominfo Kota Kendari newsroom, but we do NOT reach it
+ * directly: its Cloudflare WAF blocks datacenter IPs (Vercel/VPS). Instead we go
+ * through the SPPD relay endpoint, which fetches WordPress via scrape.do (a
+ * residential IP) and returns the raw WordPress payload. See:
+ *   sppd-update/routes/web.php → /uji-coba/berita
+ *
+ * This module is ONLY the upstream fetcher: it runs during a server-side sync
+ * (see `src/lib/db.ts`) to mirror fresh articles into Neon. The kiosk UI never
+ * calls it — it reads the cached copy from Neon, so page loads stay fast and no
+ * scrape.do credits are spent per view.
  */
 
-const WP_API_BASE =
-  (typeof window === "undefined" ? process.env.WP_API_BASE : null)?.replace(/\/$/, "") ??
-  "https://berita.kendarikota.go.id/wp-json/wp/v2";
-
-/**
- * Optional shared-secret header for the upstream fetch. When the source sits
- * behind Cloudflare (or any WAF) that blocks Vercel's datacenter IPs, the site
- * owner can add a WAF "Skip" rule that allows requests carrying this header, and
- * we send it here. Configure both env vars to enable; unset ⇒ nothing is sent
- * (no behaviour change).
- *
- *   WP_BYPASS_HEADER  e.g. "X-Kiosk-Key"
- *   WP_BYPASS_TOKEN   the secret value the WAF rule matches on
- */
-function bypassHeaders(): Record<string, string> {
-  const name = process.env.WP_BYPASS_HEADER?.trim();
-  const value = process.env.WP_BYPASS_TOKEN;
-  return name && value ? { [name]: value } : {};
-}
+const SPPD_BERITA_URL =
+  process.env.SPPD_BERITA_URL?.replace(/\/$/, "") ??
+  "https://sppd.ilmifaizan.cloud/uji-coba/berita";
 
 /** How many headlines the slideshow rotates through (PRD F-01: 20). */
 export const NEWS_COUNT = 20;
@@ -59,9 +48,11 @@ interface WpPost {
   id: number;
   date: string;
   link: string;
-  title: WpRendered;
-  excerpt: WpRendered;
-  content: WpRendered;
+  // Optional because the payload is proxied via scrape.do — a stray malformed
+  // post shouldn't be assumed to carry every rendered sub-object.
+  title?: WpRendered;
+  excerpt?: WpRendered;
+  content?: WpRendered;
   _embedded?: {
     author?: Array<{ name?: string }>;
     "wp:featuredmedia"?: WpMedia[];
@@ -161,20 +152,22 @@ function pickCategory(terms?: WpTerm[][]): string {
 function normalize(post: WpPost): NewsItem {
   const media = post._embedded?.["wp:featuredmedia"]?.[0];
   const image = pickImage(media);
+  // Defensive field access: the relay proxies a third party (scrape.do), so an
+  // occasional post could arrive without a `rendered` sub-object. Fall back to
+  // empty strings rather than throwing and failing the whole all-or-nothing sync.
+  const title = toPlainText(post.title?.rendered ?? "");
   return {
     id: post.id,
-    title: toPlainText(post.title.rendered),
-    excerpt: toPlainText(post.excerpt.rendered),
-    contentHtml: sanitizeContent(post.content.rendered),
+    title,
+    excerpt: toPlainText(post.excerpt?.rendered ?? ""),
+    contentHtml: sanitizeContent(post.content?.rendered ?? ""),
     date: post.date,
     dateLabel: formatDateLabel(post.date),
     category: pickCategory(post._embedded?.["wp:term"]),
     imageUrl: image,
     // Full-size original (uncropped) so the lightbox can show the whole frame.
     imageFullUrl: media?.source_url ?? image,
-    imageAlt: media?.alt_text
-      ? toPlainText(media.alt_text)
-      : toPlainText(post.title.rendered),
+    imageAlt: media?.alt_text ? toPlainText(media.alt_text) : title,
     author: post._embedded?.author?.[0]?.name ?? "Redaksi",
     link: post.link,
   };
@@ -193,35 +186,23 @@ export function formatDateLabel(iso: string): string {
 // --- Public API (upstream source) ------------------------------------------
 
 /**
- * Fetch + parse JSON from the WordPress source with a small retry/backoff.
- *
- * Works in BOTH runtimes: on the server (sync job) and directly in the kiosk
- * browser. The latter matters because the source's WAF blocks Vercel's
- * datacenter IPs but allows the kiosk's Indonesian ISP IP, so the browser can
- * reach the source when the server can't. (`User-Agent` is a forbidden header
- * in browsers and simply ignored there — harmless.)
- *
- * The WAF occasionally answers a legitimate request with 403/429/5xx (rate
- * limiting), so we retry those a couple of times before giving up.
+ * GET + parse JSON from the SPPD relay with a small retry/backoff. The relay can
+ * answer 502 when scrape.do momentarily fails, or 429 under rate limiting, so we
+ * retry those a couple of times before giving up. Runs server-side only.
  */
-async function fetchWpJson<T>(url: string, label: string): Promise<T> {
+async function fetchJson<T>(url: string, label: string): Promise<T> {
   const MAX_ATTEMPTS = 3;
   let lastError = "";
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {
       const res = await fetch(url, {
         cache: "no-store",
-        headers: {
-          Accept: "application/json",
-          "User-Agent":
-            "Mozilla/5.0 (compatible; KendariNewsKiosk/1.0; +https://berita.kendarikota.go.id)",
-          ...bypassHeaders(),
-        },
+        headers: { Accept: "application/json" },
       });
       if (res.ok) return (await res.json()) as T;
       lastError = `${label} fetch failed: ${res.status} ${res.statusText}`;
-      // 4xx other than the WAF-ish 403/429 won't fix themselves — fail fast.
-      if (res.status !== 403 && res.status !== 429 && res.status < 500) break;
+      // 4xx (other than 429) won't fix itself on retry — fail fast.
+      if (res.status !== 429 && res.status < 500) break;
     } catch (err) {
       lastError = err instanceof Error ? err.message : String(err);
     }
@@ -232,31 +213,35 @@ async function fetchWpJson<T>(url: string, label: string): Promise<T> {
   throw new Error(lastError || `${label} fetch failed`);
 }
 
-/**
- * Pull the latest headlines straight from the WordPress newsroom. The list
- * endpoint already embeds full `content.rendered`, so a single list fetch gives
- * us everything the detail pages need too. Used by the server sync job AND by
- * the kiosk browser as its primary (unblocked) refresh source.
- */
-export async function fetchPostsFromSource(count = NEWS_COUNT): Promise<NewsItem[]> {
-  // orderby=date&order=desc → newest article first, down to the oldest.
-  const url = `${WP_API_BASE}/posts?per_page=${count}&_embed&orderby=date&order=desc`;
-  const data = await fetchWpJson<WpPost[]>(url, "posts");
-  return data.map(normalize);
+/** Envelope returned by the SPPD relay: `{ ok, via, jumlah, data: WpPost[] }`. */
+interface SppdBeritaResponse {
+  ok?: boolean;
+  via?: string;
+  jumlah?: number;
+  data?: WpPost[];
 }
 
 /**
- * Fetch a single article by its WordPress id, straight from the source. Lets the
- * kiosk browser open a brand-new article's detail page even before it has been
- * mirrored into Neon. Returns null if it can't be fetched (blocked/offline/gone)
- * so callers can fall back to the DB-backed copy.
+ * Pull the latest headlines via the SPPD relay (WordPress through scrape.do).
+ * The relay returns the raw WP payload with full `content.rendered` + `_embedded`,
+ * so a single fetch gives us everything the detail pages need too. This is the
+ * ONE place that touches the upstream — called by the server sync job (db.ts).
  */
-export async function fetchPostFromSource(id: number): Promise<NewsItem | null> {
-  const url = `${WP_API_BASE}/posts/${id}?_embed`;
-  try {
-    const data = await fetchWpJson<WpPost>(url, "post");
-    return data && typeof data.id === "number" ? normalize(data) : null;
-  } catch {
-    return null;
-  }
+export async function fetchPostsFromSource(count = NEWS_COUNT): Promise<NewsItem[]> {
+  const body = await fetchJson<SppdBeritaResponse>(SPPD_BERITA_URL, "posts");
+  const posts = Array.isArray(body?.data) ? body.data : [];
+  // scrape.do occasionally returns a malformed batch (right length, but posts
+  // missing their `title`/`content` — e.g. a partial Cloudflare response). Keep
+  // ONLY well-formed posts (numeric id + non-empty title). If a whole batch is
+  // junk this yields [], and syncPosts' empty-guard preserves the good Neon copy
+  // rather than clobbering it. Relay is newest-first, capped at 20.
+  return posts
+    .filter(
+      (p) =>
+        typeof p?.id === "number" &&
+        typeof p.title?.rendered === "string" &&
+        p.title.rendered.trim() !== "",
+    )
+    .slice(0, count)
+    .map(normalize);
 }

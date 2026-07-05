@@ -13,23 +13,14 @@ import { Badge } from "./ui/badge";
 import { Card } from "./ui/card";
 import { Button } from "./ui/button";
 import { LoadingScreen } from "./LoadingScreen";
-import { fetchPostsFromSource } from "@/lib/wp";
 
 /**
- * Refresh the headline list. Primary source is the WordPress newsroom fetched
- * DIRECTLY in the browser: the kiosk runs on an Indonesian ISP IP the source
- * allows, whereas the Vercel server IP is blocked by its WAF. If the direct
- * fetch fails (e.g. viewed from outside Indonesia, or offline) we fall back to
- * our own Neon-backed feed, which is fast but only as fresh as the last server
- * sync.
+ * Refresh the headline list from our Neon-backed feed (`/api/posts`). Neon is the
+ * single source of truth: it is kept fresh by the scheduled server sync (and the
+ * /admin "Fetch Ulang"), which pulls from the SPPD relay. The kiosk browser never
+ * touches the newsroom or scrape.do directly, so no credits are spent per view.
  */
 async function fetchPostsFromApi(): Promise<NewsItem[]> {
-  try {
-    const direct = await fetchPostsFromSource();
-    if (direct.length > 0) return direct;
-  } catch {
-    /* source blocked/unreachable — fall back to the cached DB feed below */
-  }
   const res = await fetch("/api/posts", { cache: "no-store" });
   if (!res.ok) return [];
   const data = (await res.json()) as { posts?: NewsItem[] };

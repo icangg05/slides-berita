@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSyncState, syncPosts } from "@/lib/db";
-import { getFetchIntervalHours } from "@/lib/fetch-schedule";
+import { getFetchTimes } from "@/lib/fetch-schedule";
 
 /**
  * Admin endpoint that (re)fetches articles from the WordPress source into Neon.
@@ -25,7 +25,7 @@ export async function GET() {
     return NextResponse.json({
       ...state,
       tokenRequired: Boolean(process.env.ADMIN_TOKEN),
-      autoFetchHours: getFetchIntervalHours(),
+      autoFetchTimes: getFetchTimes(),
     });
   } catch (err) {
     console.error("[api/admin/sync] state read failed:", err);
