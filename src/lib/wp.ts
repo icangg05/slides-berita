@@ -201,8 +201,9 @@ async function fetchJson<T>(url: string, label: string): Promise<T> {
       });
       if (res.ok) return (await res.json()) as T;
       lastError = `${label} fetch failed: ${res.status} ${res.statusText}`;
-      // 4xx (other than 429) won't fix itself on retry — fail fast.
-      if (res.status !== 429 && res.status < 500) break;
+      // Only 429 is worth retrying. A 5xx from the relay means it already tried
+      // upstream and has nothing to serve — retrying just re-charges scrape.do.
+      if (res.status !== 429) break;
     } catch (err) {
       lastError = err instanceof Error ? err.message : String(err);
     }
@@ -213,35 +214,60 @@ async function fetchJson<T>(url: string, label: string): Promise<T> {
   throw new Error(lastError || `${label} fetch failed`);
 }
 
-/** Envelope returned by the SPPD relay: `{ ok, via, jumlah, data: WpPost[] }`. */
+/** Outcome the relay reports for a fetch attempt. */
+export type FetchStatus = "success" | "incomplete" | "failed";
+
+/** Envelope returned by the SPPD relay. */
 interface SppdBeritaResponse {
   ok?: boolean;
-  via?: string;
-  jumlah?: number;
+  fetch_status?: string; // success | incomplete | failed
+  served?: string; // fresh | last-good | cache | none
   data?: WpPost[];
+}
+
+export interface SourceResult {
+  /** Complete, normalised articles the relay served (fresh OR last-good copy). */
+  items: NewsItem[];
+  /** What happened upstream this attempt (drives the /admin status). */
+  status: FetchStatus;
+  /** Which copy the relay served: fresh | last-good | cache | none. */
+  served: string;
 }
 
 /**
  * Pull the latest headlines via the SPPD relay (WordPress through scrape.do).
- * The relay returns the raw WP payload with full `content.rendered` + `_embedded`,
- * so a single fetch gives us everything the detail pages need too. This is the
- * ONE place that touches the upstream — called by the server sync job (db.ts).
+ * We always send `?force=1` so the relay skips its serve-fresh cache and fetches
+ * live — both the scheduled sync and the /admin button want the freshest data.
+ *
+ * The relay is the gate: on a fully-complete fetch it serves fresh data
+ * (`status: success`); on a failed or incomplete fetch it serves the last-good
+ * copy instead (`status: failed | incomplete`) so we never propagate junk. This
+ * is the ONE place that touches the upstream — called by the server sync (db.ts).
  */
-export async function fetchPostsFromSource(count = NEWS_COUNT): Promise<NewsItem[]> {
-  const body = await fetchJson<SppdBeritaResponse>(SPPD_BERITA_URL, "posts");
-  const posts = Array.isArray(body?.data) ? body.data : [];
-  // scrape.do occasionally returns a malformed batch (right length, but posts
-  // missing their `title`/`content` — e.g. a partial Cloudflare response). Keep
-  // ONLY well-formed posts (numeric id + non-empty title). If a whole batch is
-  // junk this yields [], and syncPosts' empty-guard preserves the good Neon copy
-  // rather than clobbering it. Relay is newest-first, capped at 20.
-  return posts
-    .filter(
-      (p) =>
-        typeof p?.id === "number" &&
-        typeof p.title?.rendered === "string" &&
-        p.title.rendered.trim() !== "",
-    )
-    .slice(0, count)
-    .map(normalize);
+export async function fetchPostsFromSource(count = NEWS_COUNT): Promise<SourceResult> {
+  try {
+    const body = await fetchJson<SppdBeritaResponse>(`${SPPD_BERITA_URL}?force=1`, "posts");
+    const raw = body.fetch_status;
+    const status: FetchStatus =
+      raw === "success" || raw === "incomplete" || raw === "failed"
+        ? raw
+        : body.ok
+          ? "success"
+          : "failed";
+    const posts = Array.isArray(body?.data) ? body.data : [];
+    // Defensive: keep only well-formed posts (numeric id + non-empty title).
+    const items = posts
+      .filter(
+        (p) =>
+          typeof p?.id === "number" &&
+          typeof p.title?.rendered === "string" &&
+          p.title.rendered.trim() !== "",
+      )
+      .slice(0, count)
+      .map(normalize);
+    return { items, status, served: body.served ?? "" };
+  } catch {
+    // Relay 502 (no data at all) or a network error → total failure, no data.
+    return { items: [], status: "failed", served: "none" };
+  }
 }

@@ -11,12 +11,25 @@ interface SyncState {
   totalPosts: number;
   tokenRequired?: boolean;
   autoFetchTimes?: number[];
+  throttleSeconds?: number;
+}
+
+type FetchStatus = "success" | "incomplete" | "failed";
+
+/** Short badge label + colour class for the three fetch outcomes. */
+function statusBadge(status: string | null): { label: string; cls: string } {
+  if (status === "success") return { label: "Berhasil", cls: "text-emerald-300" };
+  if (status === "incomplete") return { label: "Data lama", cls: "text-amber-300" };
+  if (status === "failed") return { label: "Gagal", cls: "text-red-300" };
+  return { label: "—", cls: "" };
 }
 
 /** Turn a raw `last_status` value into a short, human-readable reason. */
 function describeStatus(status: string | null): string {
-  if (!status || status === "ok") return "";
-  if (status === "empty") return "Sumber tidak mengembalikan artikel.";
+  if (!status || status === "success") return "";
+  if (status === "incomplete")
+    return "Fetch berhasil tetapi data kurang lengkap — memakai data lama.";
+  if (status === "failed") return "Fetch gagal total — memakai data lama.";
   return status.replace(/^error:\s*/, "");
 }
 
@@ -24,6 +37,9 @@ interface SyncResponse {
   ok: boolean;
   count: number;
   syncedAt: string;
+  fetchStatus?: FetchStatus;
+  throttled?: boolean;
+  retryAfter?: number;
   error?: string;
   state?: SyncState | null;
 }
@@ -52,8 +68,24 @@ export default function AdminPage() {
   const [showToken, setShowToken] = useState(false);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<
-    { kind: "ok" | "error"; text: string } | null
+    { kind: "ok" | "warn" | "error"; text: string } | null
   >(null);
+  // Ticking clock so the cooldown countdown updates every second.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  // Seconds left before another manual fetch is allowed (server enforces the
+  // same window; this just mirrors it so the button shows a live countdown).
+  const throttleS = state?.throttleSeconds ?? 60;
+  const cooldownLeft = state?.lastSyncedAt
+    ? Math.max(
+        0,
+        Math.ceil(throttleS - (now - new Date(state.lastSyncedAt).getTime()) / 1000),
+      )
+    : 0;
 
   const loadState = useCallback(async () => {
     try {
@@ -80,15 +112,29 @@ export default function AdminPage() {
 
       if (res.status === 401) {
         setMessage({ kind: "error", text: "Token admin salah atau kosong." });
-      } else if (data.ok) {
+      } else if (res.status === 429 || data.throttled) {
+        setMessage({
+          kind: "warn",
+          text:
+            data.error ??
+            `Terlalu sering. Tunggu ${data.retryAfter ?? throttleS} detik.`,
+        });
+      } else if (data.fetchStatus === "success") {
         setMessage({
           kind: "ok",
-          text: `Berhasil menarik ${data.count} berita dari sumber.`,
+          text: `Berhasil menarik ${data.count} berita (data lengkap).`,
+        });
+      } else if (data.fetchStatus === "incomplete") {
+        setMessage({
+          kind: "warn",
+          text: "Fetch berhasil tetapi data kurang lengkap — tetap memakai data lama.",
         });
       } else {
         setMessage({
           kind: "error",
-          text: data.error ?? "Gagal menyinkronkan berita.",
+          text: data.ok
+            ? "Fetch gagal total — tetap memakai data lama."
+            : (data.error ?? "Fetch gagal dan belum ada data lama."),
         });
       }
       // Merge so the auto-fetch/token info from the GET is preserved (the POST
@@ -148,19 +194,9 @@ export default function AdminPage() {
           <div className="rounded-xl border border-white/15 bg-white/5 p-3 text-center backdrop-blur-md">
             <RefreshCw className="mx-auto mb-1 size-4 text-blue-100/60" />
             <div
-              className={`font-heading text-sm font-bold leading-tight ${
-                state?.lastStatus === "ok"
-                  ? "text-emerald-300"
-                  : state?.lastStatus
-                    ? "text-red-300"
-                    : ""
-              }`}
+              className={`font-heading text-sm font-bold leading-tight ${statusBadge(state?.lastStatus ?? null).cls}`}
             >
-              {state?.lastStatus === "ok"
-                ? "Berhasil"
-                : state?.lastStatus
-                  ? "Gagal"
-                  : "—"}
+              {statusBadge(state?.lastStatus ?? null).label}
             </div>
             <div className="mt-1 text-[0.65rem] uppercase tracking-wide text-blue-100/60">
               Fetch terakhir
@@ -176,18 +212,38 @@ export default function AdminPage() {
           </span>
         </div>
 
-        {/* Failed-attempt notice — only when the most recent attempt failed.
-            The kiosk keeps showing the last good data (above); this just flags
-            that the newest fetch didn't go through. */}
-        {state?.lastStatus && state.lastStatus !== "ok" && (
-          <div className="rounded-xl border border-red-400/30 bg-red-500/10 px-4 py-2.5 text-xs">
-            <div className="font-semibold text-red-100">
-              Percobaan terakhir gagal
+        {/* Notice when the most recent attempt wasn't a clean success. The kiosk
+            keeps showing the last good data (above); this flags that the newest
+            fetch was incomplete (amber) or failed (red) and old data is in use. */}
+        {state?.lastStatus && state.lastStatus !== "success" && (
+          <div
+            className={`rounded-xl border px-4 py-2.5 text-xs ${
+              state.lastStatus === "incomplete"
+                ? "border-amber-400/30 bg-amber-500/10"
+                : "border-red-400/30 bg-red-500/10"
+            }`}
+          >
+            <div
+              className={`font-semibold ${
+                state.lastStatus === "incomplete" ? "text-amber-100" : "text-red-100"
+              }`}
+            >
+              {state.lastStatus === "incomplete"
+                ? "Data kurang lengkap"
+                : "Percobaan terakhir gagal"}
             </div>
-            <div className="mt-0.5 text-red-100/80">
+            <div
+              className={`mt-0.5 ${
+                state.lastStatus === "incomplete" ? "text-amber-100/80" : "text-red-100/80"
+              }`}
+            >
               {describeStatus(state.lastStatus)}
             </div>
-            <div className="mt-0.5 text-red-100/60">
+            <div
+              className={`mt-0.5 ${
+                state.lastStatus === "incomplete" ? "text-amber-100/60" : "text-red-100/60"
+              }`}
+            >
               {formatWhen(state.lastSyncedAt ?? null)}
             </div>
           </div>
@@ -196,8 +252,9 @@ export default function AdminPage() {
         {/* Action panel */}
         <section className="rounded-2xl border border-white/15 bg-white/5 p-4 backdrop-blur-md">
           <p className="mb-3 text-xs leading-relaxed text-blue-100/70">
-            Tarik artikel terbaru dari sumber WordPress ke database Neon. Data
-            juga tersegarkan otomatis di latar belakang sesuai jadwal di atas.
+            Paksa tarik artikel terbaru dari sumber (langsung, tanpa cache) ke
+            database Neon. Jika hasilnya gagal/kurang lengkap, data lama tetap
+            dipakai. Otomatis juga berjalan sesuai jadwal di atas.
           </p>
 
           {state?.tokenRequired && (
@@ -243,13 +300,18 @@ export default function AdminPage() {
           <button
             type="button"
             onClick={runSync}
-            disabled={loading}
+            disabled={loading || cooldownLeft > 0}
             className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-5 py-3 font-heading text-sm font-bold text-white shadow-lg transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {loading ? (
               <>
                 <span className="size-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
                 Menyinkronkan…
+              </>
+            ) : cooldownLeft > 0 ? (
+              <>
+                <Clock className="size-4" />
+                Tunggu {cooldownLeft} detik
               </>
             ) : (
               <>
@@ -264,7 +326,9 @@ export default function AdminPage() {
               className={`mt-3 rounded-lg px-3 py-2 text-xs font-medium ${
                 message.kind === "ok"
                   ? "bg-emerald-500/15 text-emerald-100 ring-1 ring-emerald-400/30"
-                  : "bg-red-500/15 text-red-100 ring-1 ring-red-400/30"
+                  : message.kind === "warn"
+                    ? "bg-amber-500/15 text-amber-100 ring-1 ring-amber-400/30"
+                    : "bg-red-500/15 text-red-100 ring-1 ring-red-400/30"
               }`}
             >
               {message.text}

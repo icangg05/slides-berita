@@ -1,6 +1,11 @@
 import { neon } from "@neondatabase/serverless";
 import type { NewsItem } from "./types";
-import { fetchPostsFromSource, formatDateLabel, NEWS_COUNT } from "./wp";
+import {
+  fetchPostsFromSource,
+  formatDateLabel,
+  NEWS_COUNT,
+  type FetchStatus,
+} from "./wp";
 
 /**
  * Neon (Postgres) data layer — the kiosk's source of truth at read time.
@@ -149,9 +154,12 @@ export async function getPostsForDisplay(limit = NEWS_COUNT): Promise<NewsItem[]
 // --- Writes (sync) ---------------------------------------------------------
 
 export interface SyncResult {
+  /** True when the kiosk has usable data after this run (fresh or retained). */
   ok: boolean;
   count: number;
   syncedAt: string;
+  /** Upstream outcome: success (fresh) | incomplete | failed (both keep old). */
+  fetchStatus: FetchStatus;
   error?: string;
 }
 
@@ -214,44 +222,67 @@ async function recordSync(
   `;
 }
 
+/** Human note stored/shown for each fetch outcome. */
+function statusMessage(status: FetchStatus): string {
+  switch (status) {
+    case "success":
+      return "Berhasil — data lengkap.";
+    case "incomplete":
+      return "Fetch berhasil tetapi data kurang lengkap — memakai data lama.";
+    case "failed":
+      return "Fetch gagal — memakai data lama.";
+  }
+}
+
 /**
- * Pull the latest articles from the WordPress source and upsert them into Neon.
- * This is the ONE place that hits the upstream API. Older rows are kept (the
- * kiosk only ever shows the newest `NEWS_COUNT`), so previously linked detail
- * pages keep working.
+ * Pull the latest articles via the SPPD relay and upsert them into Neon. This is
+ * the ONE place that hits the upstream. The relay is the gate: it only serves
+ * FRESH data on a fully-complete fetch, otherwise it serves its last-good copy.
+ *
+ * We therefore write to Neon only on `success` (or to seed an empty table);
+ * on `incomplete`/`failed` we intentionally KEEP the existing rows — the kiosk
+ * keeps showing the last good data. Older rows are always retained (the kiosk
+ * shows only the newest `NEWS_COUNT`), so previously linked detail pages work.
  */
 export async function syncPosts(count = NEWS_COUNT): Promise<SyncResult> {
   await ensureSchema();
+  const syncedAt = new Date().toISOString();
   try {
-    const items = await fetchPostsFromSource(count);
+    const { items, status } = await fetchPostsFromSource(count);
+
     if (items.length === 0) {
-      // Don't clobber good data with an empty upstream response.
-      await recordSync(await countPosts(), "empty", false);
-      return {
-        ok: false,
-        count: 0,
-        syncedAt: new Date().toISOString(),
-        error: "Sumber berita tidak mengembalikan artikel.",
-      };
+      // Nothing usable to serve (relay failed with no last-good). Keep whatever
+      // is already in Neon; report the outcome.
+      await recordSync(await countPosts(), status, false);
+      return { ok: false, count: 0, syncedAt, fetchStatus: status, error: statusMessage(status) };
     }
-    await upsertPosts(items);
+
+    // Write on a genuine fresh success, or to seed a still-empty table so a cold
+    // start isn't a blank screen even when the relay only had a last-good copy.
+    const existing = await countPosts();
+    if (status === "success" || existing === 0) {
+      await upsertPosts(items);
+    }
+
     const total = await countPosts();
-    await recordSync(total, "ok", true);
-    return { ok: true, count: items.length, syncedAt: new Date().toISOString() };
+    // last_success_at only advances on a real fresh success.
+    await recordSync(total, status, status === "success");
+    return {
+      ok: true,
+      count: items.length,
+      syncedAt,
+      fetchStatus: status,
+      error: status === "success" ? undefined : statusMessage(status),
+    };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error("[db] sync failed:", message);
     try {
-      await recordSync(await countPosts(), `error: ${message}`, false);
+      await recordSync(await countPosts(), "failed", false);
     } catch {
       /* recording the failure is best-effort */
     }
-    return {
-      ok: false,
-      count: 0,
-      syncedAt: new Date().toISOString(),
-      error: message,
-    };
+    return { ok: false, count: 0, syncedAt, fetchStatus: "failed", error: message };
   }
 }
 
