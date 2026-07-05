@@ -190,24 +190,21 @@ export function formatDateLabel(iso: string): string {
   return `${dateFormatter.format(d)} WITA`;
 }
 
-// --- Public API (upstream source only) -------------------------------------
+// --- Public API (upstream source) ------------------------------------------
 
 /**
- * Pull the latest headlines straight from the WordPress newsroom.
+ * Fetch + parse JSON from the WordPress source with a small retry/backoff.
  *
- * Used exclusively by the sync job. `cache: "no-store"` guarantees a real
- * upstream hit (an admin pressing "Fetch ulang" must get genuinely fresh data,
- * not a Next.js data-cache replay). The list endpoint already embeds full
- * `content.rendered`, so a single list fetch gives us everything the detail
- * pages need too.
+ * Works in BOTH runtimes: on the server (sync job) and directly in the kiosk
+ * browser. The latter matters because the source's WAF blocks Vercel's
+ * datacenter IPs but allows the kiosk's Indonesian ISP IP, so the browser can
+ * reach the source when the server can't. (`User-Agent` is a forbidden header
+ * in browsers and simply ignored there — harmless.)
+ *
+ * The WAF occasionally answers a legitimate request with 403/429/5xx (rate
+ * limiting), so we retry those a couple of times before giving up.
  */
-export async function fetchPostsFromSource(count = NEWS_COUNT): Promise<NewsItem[]> {
-  // orderby=date&order=desc → newest article first, down to the oldest.
-  const url = `${WP_API_BASE}/posts?per_page=${count}&_embed&orderby=date&order=desc`;
-  // The upstream sits behind a WAF that occasionally answers a legitimate
-  // request with 403/429/5xx (rate limiting). Retry a couple of times with a
-  // short backoff before giving up, so a spurious block doesn't fail the sync.
-  // A browser-like User-Agent also placates WAFs that reject the default one.
+async function fetchWpJson<T>(url: string, label: string): Promise<T> {
   const MAX_ATTEMPTS = 3;
   let lastError = "";
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
@@ -221,11 +218,8 @@ export async function fetchPostsFromSource(count = NEWS_COUNT): Promise<NewsItem
           ...bypassHeaders(),
         },
       });
-      if (res.ok) {
-        const data = (await res.json()) as WpPost[];
-        return data.map(normalize);
-      }
-      lastError = `posts fetch failed: ${res.status} ${res.statusText}`;
+      if (res.ok) return (await res.json()) as T;
+      lastError = `${label} fetch failed: ${res.status} ${res.statusText}`;
       // 4xx other than the WAF-ish 403/429 won't fix themselves — fail fast.
       if (res.status !== 403 && res.status !== 429 && res.status < 500) break;
     } catch (err) {
@@ -235,5 +229,34 @@ export async function fetchPostsFromSource(count = NEWS_COUNT): Promise<NewsItem
       await new Promise((r) => setTimeout(r, attempt * 800));
     }
   }
-  throw new Error(lastError || "posts fetch failed");
+  throw new Error(lastError || `${label} fetch failed`);
+}
+
+/**
+ * Pull the latest headlines straight from the WordPress newsroom. The list
+ * endpoint already embeds full `content.rendered`, so a single list fetch gives
+ * us everything the detail pages need too. Used by the server sync job AND by
+ * the kiosk browser as its primary (unblocked) refresh source.
+ */
+export async function fetchPostsFromSource(count = NEWS_COUNT): Promise<NewsItem[]> {
+  // orderby=date&order=desc → newest article first, down to the oldest.
+  const url = `${WP_API_BASE}/posts?per_page=${count}&_embed&orderby=date&order=desc`;
+  const data = await fetchWpJson<WpPost[]>(url, "posts");
+  return data.map(normalize);
+}
+
+/**
+ * Fetch a single article by its WordPress id, straight from the source. Lets the
+ * kiosk browser open a brand-new article's detail page even before it has been
+ * mirrored into Neon. Returns null if it can't be fetched (blocked/offline/gone)
+ * so callers can fall back to the DB-backed copy.
+ */
+export async function fetchPostFromSource(id: number): Promise<NewsItem | null> {
+  const url = `${WP_API_BASE}/posts/${id}?_embed`;
+  try {
+    const data = await fetchWpJson<WpPost>(url, "post");
+    return data && typeof data.id === "number" ? normalize(data) : null;
+  } catch {
+    return null;
+  }
 }

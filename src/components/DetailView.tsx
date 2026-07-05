@@ -11,17 +11,31 @@ import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { LoadingScreen } from "./LoadingScreen";
 import { BeritaMissing } from "./BeritaMissing";
+import { fetchPostFromSource, fetchPostsFromSource } from "@/lib/wp";
 
-/** Fetch a single stored article from our own DB-backed API. */
+/**
+ * Fetch a single article. Primary source is the newsroom fetched directly in
+ * the browser (unblocked on the kiosk's Indonesian ISP IP, unlike the Vercel
+ * server), so a brand-new article opens even before it reaches Neon. Falls back
+ * to our DB-backed API when the direct fetch fails.
+ */
 async function fetchPostFromApi(id: number): Promise<NewsItem | null> {
+  const direct = await fetchPostFromSource(id);
+  if (direct) return direct;
   const res = await fetch(`/api/posts/${id}`, { cache: "no-store" });
   if (!res.ok) return null;
   const data = (await res.json()) as { post?: NewsItem | null };
   return data.post ?? null;
 }
 
-/** Fetch the current headline list from our own DB-backed API. */
+/** Headline list — direct-from-source first, Neon-backed API as fallback. */
 async function fetchPostsFromApi(): Promise<NewsItem[]> {
+  try {
+    const direct = await fetchPostsFromSource();
+    if (direct.length > 0) return direct;
+  } catch {
+    /* source blocked/unreachable — fall back to the cached DB feed below */
+  }
   const res = await fetch("/api/posts", { cache: "no-store" });
   if (!res.ok) return [];
   const data = (await res.json()) as { posts?: NewsItem[] };

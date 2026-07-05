@@ -13,9 +13,23 @@ import { Badge } from "./ui/badge";
 import { Card } from "./ui/card";
 import { Button } from "./ui/button";
 import { LoadingScreen } from "./LoadingScreen";
+import { fetchPostsFromSource } from "@/lib/wp";
 
-/** Fetch the current headline list from our own DB-backed API. */
+/**
+ * Refresh the headline list. Primary source is the WordPress newsroom fetched
+ * DIRECTLY in the browser: the kiosk runs on an Indonesian ISP IP the source
+ * allows, whereas the Vercel server IP is blocked by its WAF. If the direct
+ * fetch fails (e.g. viewed from outside Indonesia, or offline) we fall back to
+ * our own Neon-backed feed, which is fast but only as fresh as the last server
+ * sync.
+ */
 async function fetchPostsFromApi(): Promise<NewsItem[]> {
+  try {
+    const direct = await fetchPostsFromSource();
+    if (direct.length > 0) return direct;
+  } catch {
+    /* source blocked/unreachable — fall back to the cached DB feed below */
+  }
   const res = await fetch("/api/posts", { cache: "no-store" });
   if (!res.ok) return [];
   const data = (await res.json()) as { posts?: NewsItem[] };
@@ -133,20 +147,27 @@ export function Kiosk({ initialPosts }: { initialPosts: NewsItem[] }) {
   }, [posts.length]);
 
   // --- Background refresh (live newsroom) ---------------------------------
-  // Polls our own DB-backed feed, so it stays fast and never touches the
-  // upstream API. Fresh articles appear here once an admin runs a sync.
+  // Pulls fresh headlines straight from the source in the browser (see
+  // fetchPostsFromApi). Runs once immediately on mount so the SSR/Neon snapshot
+  // is replaced with genuinely fresh data quickly, then repeats every ~5 min.
   useEffect(() => {
-    const id = setInterval(async () => {
+    let cancelled = false;
+    async function refresh() {
       try {
         const fetched = await fetchPostsFromApi();
-        if (fetched.length > 0) {
+        if (!cancelled && fetched.length > 0) {
           setPosts((prev) => (sameOrder(prev, fetched) ? prev : fetched));
         }
       } catch {
         /* transient network blip on the kiosk — keep showing cached slides */
       }
-    }, POLL_MS);
-    return () => clearInterval(id);
+    }
+    refresh();
+    const id = setInterval(refresh, POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
   }, []);
 
   useEffect(() => {
