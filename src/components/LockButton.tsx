@@ -3,13 +3,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Lock, LockOpen } from "lucide-react";
 
-const HOLD_MS = 1500; // hold 1.5 seconds to toggle the lock.
+const HOLD_MS = 500; // hold 0.5 seconds to toggle the lock.
 
 /**
  * Floating lockdown control (PRD F-03).
  *
  * The kiosk starts LOCKED. A staff member press-and-holds this button for
- * 1.5 s to toggle "Kunci" mode (a progress ring fills as feedback). When the
+ * 0.5 s to toggle "Kunci" mode (a progress ring fills as feedback). When the
  * public taps the locked screen, `hintTick` is bumped and this icon shakes to
  * say "you have to hold this first".
  */

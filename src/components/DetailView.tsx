@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, ArrowUp, X } from "lucide-react";
 import type { NewsItem } from "@/lib/types";
-import { Logo } from "./Logo";
 import { Footer } from "./Footer";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
@@ -31,10 +30,10 @@ async function fetchPostsFromApi(): Promise<NewsItem[]> {
   return data.posts ?? [];
 }
 
-const RESUME_IDLE_MS = 1500; // resume auto-scroll this long after last touch.
-const AUTO_SCROLL_PXPS = 40; // auto-scroll speed (px / second).
-const START_DELAY_MS = 1600; // let the reader see the top before scrolling.
-const NEXT_COUNTDOWN = 10; // seconds at the end before the next article.
+const RESUME_IDLE_MS = 0; // resume auto-scroll immediately after a gesture (no delay).
+const AUTO_SCROLL_PXPS = 120; // auto-scroll speed (px / second).
+const START_DELAY_MS = 1100; // let the reader see the top before scrolling.
+const NEXT_COUNTDOWN = 5; // seconds at the end before the next article.
 const SCROLL_RAMP_MS = 1400; // ease the scroll speed up from 0 → full so it never jerks into motion.
 
 /**
@@ -44,7 +43,7 @@ const SCROLL_RAMP_MS = 1400; // ease the scroll speed up from 0 → full so it n
  *    length). Any interaction pauses it; it resumes after a few idle seconds.
  *  • Tap the cover or any in-content image to enlarge it (lightbox).
  *  • Links inside the article are inert (a kiosk must never leave the site).
- *  • At the end, a 10-second countdown advances to the next berita.
+ *  • At the end, a 5-second countdown advances to the next berita.
  */
 export function DetailView({
   postId,
@@ -421,19 +420,19 @@ export function DetailView({
           <span className="sm:hidden">Kembali</span>
         </Button>
 
-        {/* Institutional identity — same as the home header (logo + text). */}
-        <div className="flex min-w-0 items-center gap-2.5 lg:gap-4">
-          <div className="size-10 shrink-0 sm:size-12 lg:size-14">
-            <Logo className="h-full w-full" />
-          </div>
-          <div className="min-w-0 leading-tight">
-            <p className="truncate font-heading text-sm font-extrabold tracking-tight text-white sm:text-base lg:text-xl">
-              Kota Kendari
-            </p>
-            <p className="truncate text-[0.7rem] font-medium text-blue-100/85 sm:text-xs lg:text-sm">
-              Dinas Komunikasi & Informatika
-            </p>
-          </div>
+        {/* Institutional identity — same as the home header (banner + text). */}
+        <div className="flex min-w-0 flex-col items-end gap-0">
+          <Image
+            src="/logo-berita-kdi.webp"
+            alt="Kendari Kota — Website Resmi Pemerintah Daerah Kota Kendari"
+            width={716}
+            height={100}
+            priority
+            className="h-6 w-auto max-w-full sm:h-8 lg:h-10"
+          />
+          <p className="truncate text-[0.7rem] font-medium text-blue-100/85 sm:text-xs lg:text-sm">
+            Dinas Komunikasi & Informatika
+          </p>
         </div>
       </header>
 
@@ -555,7 +554,9 @@ export function DetailView({
                   {nextId == null ? "Kembali ke beranda" : "Berita selanjutnya"}
                 </p>
                 <p className="text-xs text-blue-100/70 lg:text-sm">
-                  Sentuh untuk terus membaca
+                  {nextId == null
+                    ? "Sentuh untuk kembali sekarang"
+                    : "Sentuh untuk lanjut membaca berita berikutnya"}
                 </p>
               </div>
             </div>

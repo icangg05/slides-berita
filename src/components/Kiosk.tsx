@@ -29,7 +29,7 @@ async function fetchPostsFromApi(): Promise<NewsItem[]> {
 
 const SLIDE_MS = 11000; // ~11s: comfortable read time for title + excerpt, with headroom for mid-slide arrivals.
 const POLL_MS = 5 * 60 * 1000; // PRD §6: refresh headlines every ~5 min.
-const RESUME_MS = 1500; // resume motion this long after the last touch.
+const RESUME_MS = 0; // resume motion immediately after a gesture (no delay).
 const LOCK_REVEAL_MS = 4000; // keep the lock icon shown this long after a tap.
 const IDLE_LOCK_MS = 5 * 60 * 1000; // auto-lock after 5 min with no interaction.
 const LS_KEY = "kendari-kiosk-locked";
@@ -287,51 +287,35 @@ export function Kiosk({ initialPosts }: { initialPosts: NewsItem[] }) {
       {/* ---- Header (opaque top bar — no longer covers the photo) ---- */}
       <Header headlines={posts.map((p) => p.title)} paused={paused} />
 
-      {/* ---- Hero region: the featured image lives here, fully visible ---- */}
+      {/* ---- Hero region: the featured image lives here ---- */}
       <section className="relative flex-1 overflow-hidden">
         <div className="absolute inset-0 z-0">
           {posts.map((post, i) => (
             <div
               key={post.id}
-              // Mobile: the photo is anchored to the top and runs DOWN to
-              // ~62% of the hero so its lower edge tucks under the glass card —
-              // no gap between them. Height scales with the hero, so it stays
-              // gapless on both tall and short phones. `photo-fade-b` softly
-              // dissolves the bottom edge; overflow-hidden CLIPS the zoom so it
-              // stays inside the frame and never looks pre-zoomed. Desktop: full-bleed.
-              className="photo-fade-b absolute inset-x-0 top-0 h-[62%] overflow-hidden transition-opacity duration-[1200ms] ease-in-out lg:inset-0 lg:h-auto"
+              // The cover spans the FULL container width with its height left
+              // auto — so it keeps the original aspect ratio, is never
+              // stretched, and no side gaps. Nudged UP (negative top margin) so
+              // the poster template's decorative header strip (dotted band +
+              // emblem logos) is clipped out of view; whatever runs past the
+              // hero's bottom tucks naturally under the glass card.
+              className="absolute inset-0 overflow-hidden transition-opacity duration-[1200ms] ease-in-out"
               style={{ opacity: i === index ? 1 : 0 }}
               aria-hidden={i !== index}
             >
               {post.imageUrl ? (
-                <div
-                  // Active slide runs the dolly; INACTIVE slides hold the exact
-                  // transform their dolly ends on (rest-*), so an outgoing slide
-                  // never snaps back to scale 1 mid-crossfade — the motion stays
-                  // continuous whichever way the neighbours zoom.
-                  className={`h-full w-full ${
-                    i === index
-                      ? i % 2 === 0
-                        ? "animate-ken-burns-in"
-                        : "animate-ken-burns-out"
-                      : i % 2 === 0
-                        ? "ken-burns-rest-in"
-                        : "ken-burns-rest-out"
-                  }`}
-                  style={{ animationPlayState: paused ? "paused" : "running" }}
-                >
-                  <Image
-                    src={post.imageUrl}
-                    alt=""
-                    fill
-                    {...(i === 0
-                      ? { priority: true }
-                      : { loading: activeSet.has(i) ? "eager" : "lazy" })}
-                    sizes="(max-width: 1080px) 100vw, 1080px"
-                    className="object-cover"
-                    unoptimized
-                  />
-                </div>
+                <Image
+                  src={post.imageUrl}
+                  alt=""
+                  width={1080}
+                  height={1350}
+                  {...(i === 0
+                    ? { priority: true }
+                    : { loading: activeSet.has(i) ? "eager" : "lazy" })}
+                  sizes="(max-width: 1080px) 100vw, 1080px"
+                  className="photo-fade-b -mt-[10%] h-auto w-full"
+                  unoptimized
+                />
               ) : (
                 <div className="h-full w-full bg-gradient-to-br from-kendari-deep to-kendari-deepblue" />
               )}
@@ -339,7 +323,7 @@ export function Kiosk({ initialPosts }: { initialPosts: NewsItem[] }) {
           ))}
 
           {/* Bottom scrim only — keeps the glass card legible over the photo. */}
-          <div className="absolute inset-0 bg-gradient-to-t from-kendari-deepblue via-kendari-deepblue/35 to-transparent" />
+          <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-kendari-deepblue via-kendari-deepblue/35 to-transparent" />
         </div>
 
         {/* Glass content card — overlays the bottom of the photo */}

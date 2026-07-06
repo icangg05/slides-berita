@@ -125,21 +125,15 @@ function pickImage(media?: WpMedia): string | null {
   if (!media) return null;
   const sizes = media.media_details?.sizes;
   if (sizes) {
-    // Prefer a crisp, wide-ish size for the 1080px-wide portrait hero.
-    const preferred = [
-      "jnews-1140x815",
-      "jnews-1140x570",
-      "large",
-      "jnews-750x536",
-      "medium_large",
-    ];
+    // Prefer PROPORTIONAL sizes only — same aspect ratio as the original, so
+    // the cover is never cropped. (The jnews-* sizes are HARD CROPS that chop
+    // the 4:5 portrait covers into landscape — never use them.)
+    const preferred = ["1536x1536", "large", "medium_large"];
     for (const key of preferred) {
       if (sizes[key]?.source_url) return sizes[key].source_url;
     }
-    // Otherwise take the widest available.
-    const widest = Object.values(sizes).sort((a, b) => b.width - a.width)[0];
-    if (widest?.source_url) return widest.source_url;
   }
+  // Fall back to the uncropped original rather than any cropped size.
   return media.source_url ?? null;
 }
 
